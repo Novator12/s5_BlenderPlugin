@@ -418,8 +418,8 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
         sphere_obj.name = sphere_name
 
         # Custom Property hinzufügen, um die Sphere mit dem Mesh zu verknüpfen
-        mesh_o["sphere_name"] = sphere_obj.name  # Speichert den Namen der Sphere im Mesh
-        sphere_obj["linked_mesh"] = mesh_o.name  # Speichert den Namen des Meshes in der Sphere
+        #mesh_o["sphere_name"] = sphere_obj.name  # Speichert den Namen der Sphere im Mesh
+        #sphere_obj["linked_mesh"] = mesh_o.name  # Speichert den Namen des Meshes in der Sphere
 
         # Zusätzliche Eigenschaften der Sphere setzen
         sphere_obj.hide_render = True  # Unsichtbar im Render
@@ -1556,7 +1556,7 @@ def get_converter_exe_location():
     # exe_loc = __file__[:offset] + "\\RW_inline.exe"
    # exe_loc = "C:\\Users\\Simon\\AppData\\Roaming\\Blender Foundation\\Blender\\2.79\\scripts\\addons" + "\\RW_inline.exe"
    # exe_loc = "G:\\Test\\DFF-ANM-Converter\\RW\\RW\\Debug\\RW.exe"
-    exe_loc = "C:\\Users\\olive\Desktop\\Blender Dev Test\\BlenderPlugin\\RW_inline_mcb.exe"
+    exe_loc = "C:\\Program Files (x86)\\Ubisoft\\Blue Byte\\DIE SIEDLER - Das Erbe der Könige - Gold Edition\\GitRepo\\s5_BlenderPlugin\\BlenderPlugin\\RW_inline_mcb.exe"
     return exe_loc
 
 
@@ -1607,7 +1607,7 @@ def write_model(path,bone_type_data):
         outs, errs = p.communicate()
         
         #DEBUG: Eingabe in Datei schreiben
-        with open("C:\\Users\\olive\\Desktop\\Blender Dev Test\\mcb_dff\\Debug\\debug_export.json", "w", encoding="utf-8") as debugfile:
+        with open("C:\\Program Files (x86)\\Ubisoft\\Blue Byte\\DIE SIEDLER - Das Erbe der Könige - Gold Edition\\GitRepo\\s5_BlenderPlugin\\TestEnv\\debug_export.json", "w", encoding="utf-8") as debugfile:
             debugfile.write(js_str)
             
         #Export
