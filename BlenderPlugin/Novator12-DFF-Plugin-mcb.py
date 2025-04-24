@@ -29,8 +29,6 @@ from mathutils import Vector
 #Zusatzskripte
 #from particle_effects_data import PARTICLE_EFFECT_LUT  #Aktivieren wenn Plugin
 
-
-
 # -------------------------------------------------------Import Functions------------------------------------------
 # -----------------------------------------------------------------------------------------------------------------
 def mul_matrix(mat, mat2):
@@ -280,7 +278,7 @@ def make_armature_from_frames(js_frames, use_connect):
 
 def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatrix, boneName, use_connect):
     print("read_rigid_geometry-Func")
-    
+    print("FrameIndex:{}".format(frameIndex))
     empty_geometry = False 
     
     if len(js_geometry["morphTargets"][0])<=1: #Check auf leere Geometry, wie bei bspw. Particle Effects
@@ -293,11 +291,6 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
         print("Skipping geometry – expected 1 morphTarget, got", num_morph_targets)
         return
     
-
-    #Bauernhof wird hier abgefangen!
-    #if js_geometry["numTris"] == None:
-        #print("skipping geometry because of no tris")
-        #return;
         
     bm = bmesh.new()
     wd = bm.verts.layers.deform.verify()
@@ -380,9 +373,11 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
 
     bm.to_mesh(mesh)
     bm.free()
-
-    mesh_o = bpy.data.objects.new("Mesh", mesh)
-
+    global mesh_count
+    mesh_o_name = "Mesh" + str(mesh_count)
+    mesh_o = bpy.data.objects.new(mesh_o_name, mesh)
+    mesh_count += 1
+    
     vgs = mesh_o.vertex_groups
 
     vgs.new(name=boneName)#"frame_"+str(frameIndex).zfill(stringLengthOfFrames))
@@ -399,8 +394,11 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
     if not empty_geometry:
         tex_name = js_geometry["materials"][0]["textures"][0]["texture"]
         material = set_material(tex_name)
+        mesh_o.data.name = tex_name
     else:
-        tex_name = None
+        tex_name = "Empty-Geometry"
+        mesh_o.data.name = tex_name
+
     
     #Novator Additional stuff: Sphere
     if "sphere" in js_geometry["morphTargets"][0]:
@@ -434,15 +432,43 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
         # Sphere dem Mesh zuordnen (Parenting)
         sphere_obj.parent = mesh_o
         
-    return vgs
     # MaterialDataPLG (muss vorher über rwinline erst importiert werden)
+    if not empty_geometry:
+        material_tool_item = material_tool_item = bpy.context.scene.material_tool_items.add()
+        
+        material_tool_item.mesh_name = mesh_o_name
+        
+        geo_SP_spec = js_geometry['materials'][0]['SurfaceProps']['specular'] #SurfaceProps: Specular
+        geo_SP_amb = js_geometry['materials'][0]['SurfaceProps']['ambient'] #SurfaceProps: Ambient
+        geo_SP_diff = js_geometry['materials'][0]['SurfaceProps']['diffuse'] #SurfaceProps: Diffuse
+        material_tool_item.ambient = geo_SP_amb
+        material_tool_item.specular = geo_SP_spec
+        material_tool_item.diffuse = geo_SP_diff
+        
+        if js_geometry['materials'][0]['extension'] != {}: 
+            snow_tex = js_geometry['materials'][0]['extension']['MaterialFXMat']['Data1']['Texture1']['texture']
+            material_tool_item.snow_texture = snow_tex
+        else:
+            material_tool_item.snow_texture = "No data"
+            
+        if js_geometry['extension'] != {}: 
+            binmesh = js_geometry['extension']['BinMeshPLG']
+            flags = binmesh['Flags']
+            meshes = binmesh['Meshes']
+            bin_mesh_data = {'Flags': flags, 'Meshes': meshes}
+            material_tool_item.bin_mesh_data = json.dumps(bin_mesh_data)
+        else:
+            material_tool_item.bin_mesh_data = "No data"
     
-
 def read_json_rigid(js, use_connect):
     print("read_json_rigid-Func")
     js_clump = js["clump"]
     arm_o, boneNames, frames, hierarchy = make_armature_from_frames(js_clump["frames"], use_connect)    
     vertexGroups = []
+    
+    global mesh_count
+    mesh_count = 1
+    
     for atomic in js_clump["atomics"]:
         frameIndex = atomic["frameIndex"] # frameIndex ist in diesem Kontext gleich dem BoneIndex
         geometryIndex = atomic["geometryIndex"]
@@ -457,8 +483,7 @@ def read_json_rigid(js, use_connect):
 
         # aktuelle geometry lesen und erstellen
         geometry = js_clump["geometries"][geometryIndex]
-        vgs = read_rigid_geometry(geometry, js_clump, arm_o, frameIndex, frameRestMatrix, boneNames[frameIndex], use_connect)
-        vertexGroups.append(vgs)
+        read_rigid_geometry(geometry, js_clump, arm_o, frameIndex, frameRestMatrix, boneNames[frameIndex], use_connect)
         
     # ----------------- Particle Effect Auto-Detection -------------------
     if hasattr(bpy.context.scene, "particle_effects"):
@@ -753,7 +778,7 @@ def get_bone_index_by_bone_name(boneNames, name):
         if boneNames[i] == name:
             return i
         
-def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data):
+def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, material_data):
     print("new_mesh_obj_to_json-Func")
     verts_local = [v.co for v in mesh_obj.data.vertices.values()]
 
@@ -764,6 +789,13 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data):
     data['numMorphTargets'] = 1
     data['numVertices'] = len(verts_local)
         
+    mesh_name = mesh_obj.name
+    if material_data and mesh_obj.name in material_data:
+        mat_data = material_data[mesh_obj.name]
+    else:
+        mat_data = None    
+    print("Aktuelles Material Data: {}".format(mat_data))
+    
     js_vertices = []
     js_normals = []
     
@@ -786,11 +818,18 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data):
         js_normals.append(normal)
     
     data['morphTargets'] = []
+    has_vertices = len(js_vertices) > 0
+    has_normals = len(js_normals) > 0
+
     js_morphTarget = {}
-    js_morphTarget['vertices'] = js_vertices;
-    js_morphTarget['has_vertices'] = 1
-    js_morphTarget['has_normals'] = 1
-    js_morphTarget['normals'] = js_normals;
+    if has_vertices and has_normals:
+        js_morphTarget['has_vertices'] = 1
+        js_morphTarget['has_normals'] = 1
+        js_morphTarget['vertices'] = js_vertices
+        js_morphTarget['normals'] = js_normals
+    else:
+        js_morphTarget['has_vertices'] = 0
+        js_morphTarget['has_normals'] = 0
     
     # Novator Export Sphere Stuff
     # Iteriere durch die Kinder des Hauptmeshes
@@ -806,10 +845,12 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data):
 
     data['morphTargets'].append(js_morphTarget)
     
-    #Novator12
+    # Novator12 – Texture Coordinates
     data['textureCoordinates'] = []
     for uv_layer in mesh_obj.data.uv_layers:
         js_textureCoordinates = [None] * data['numVertices']
+        has_uvs = False  # Tracke, ob überhaupt gültige UVs gesetzt wurden
+
         for face in mesh_obj.data.polygons:
             for vert_idx, loop_idx in zip(face.vertices, face.loop_indices):
                 uv_coords = uv_layer.data[loop_idx].uv
@@ -817,8 +858,10 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data):
                 uv['u'] = uv_coords.x
                 uv['v'] = 1 - uv_coords.y  # Y-Koordinate invertieren
                 js_textureCoordinates[vert_idx] = uv
-        # Füge UV-Koordinaten dieses Layers hinzu
-        data['textureCoordinates'].append(js_textureCoordinates)
+                has_uvs = True
+
+        if has_uvs:
+            data['textureCoordinates'].append(js_textureCoordinates)
     
     
     #data['format'] = 65591 # TODO, depends on texture stuff...
@@ -827,10 +870,33 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data):
     else:
         data['format'] = 65591  # Nur ein UV-Layer
     
-    if not mesh_obj.data.materials: #Wenn leeres Mesh stuff erledigen
+    if data['textureCoordinates'] == []: #Wenn leeres Mesh stuff erledigen
         data['format'] = 0
-        data['extension'] = {}
-        data['extension']['BinMeshPLG'] = {"Flags":0, "Meshes": []}
+    
+    #Bin Mesh Data 
+    if mat_data != None:
+        bin_mesh_raw = mat_data.get("bin_mesh_data", "No data")
+    else:
+        bin_mesh_raw = "No data"
+    data['extension'] = {}
+    if bin_mesh_raw and bin_mesh_raw != "No data":
+        try:
+            bin_mesh_parsed = json.loads(bin_mesh_raw)
+            data['extension']['BinMeshPLG'] = {
+                "Flags": bin_mesh_parsed.get("Flags", 0),
+                "Meshes": bin_mesh_parsed.get("Meshes", [])
+            }
+        except json.JSONDecodeError:
+            print("[WARN] Ungültiges JSON in bin_mesh_data für {}, fallback auf leer.".format(mesh_name))
+            data['extension']['BinMeshPLG'] = {
+                "Flags": 0,
+                "Meshes": []
+            }
+    else:
+        data['extension']['BinMeshPLG'] = {
+            "Flags": 0,
+            "Meshes": []
+        }
     
     data['triangles'] = []
     for face in mesh_obj.data.polygons:
@@ -849,20 +915,58 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data):
     
     data['materials'] = []
     
+    
     ## TODO hardcoded texture stuff :(
     if mesh_obj.data.materials:
         for mat in mesh_obj.data.materials:
             material = OrderedDict()
             material["color"] = OrderedDict()
-            material['color']['a'] = 255
-            material['color']['r'] = 255
-            material['color']['g'] = 255
-            material['color']['b'] = 255
+            material['color']['alpha'] = 255
+            material['color']['red'] = 255
+            material['color']['green'] = 255
+            material['color']['blue'] = 255
             material['UnknownInt1'] = 0
             material['UnknownInt2'] = 237627844
-            material["SurfaceProps"] = {"ambient": 1,"specular": 0,"diffuse": 1}
-            material["extension"] = {}
             
+            if mat_data:
+                material["SurfaceProps"] = {
+                    "ambient": int(mat_data.get("ambient", 1)),
+                    "specular": int(mat_data.get("specular", 0)),
+                    "diffuse": int(mat_data.get("diffuse", 1))
+                }
+            
+            # Material Effects PLG
+            material["extension"] = {}
+            snow_tex = mat_data.get("snow_texture", "No data")
+            if snow_tex != "No data":
+                material["extension"]["MaterialFXMat"] = {
+                    "Data1": {
+                        "Type": 4,
+                        "Texture1": {
+                            "texture": snow_tex,
+                            "textureAlpha": "",
+                            "FilterAddressing": 4358,
+                            "UnusedInt1": 0,
+                            "extension": {}
+                        },
+                        "Texture2": None,
+                        "Coefficient": None,
+                        "FrameBufferAlpha": None,
+                        "SrcBlendMode": 5,
+                        "DstBlendMode": 6
+                    },
+                    "Data2": {
+                        "Type": 0,
+                        "Texture1": None,
+                        "Texture2": None,
+                        "Coefficient": None,
+                        "FrameBufferAlpha": None,
+                        "SrcBlendMode": None,
+                        "DstBlendMode": None
+                    },
+                    "Flags": 4
+                }
+    
             material['textures'] = []
             texture = OrderedDict()
             texture["texture"] = re.sub(r'\.\d+$', '', mat.name)  # Vereinheitlichung der texturen Novator12
@@ -875,8 +979,7 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data):
             material['textures'].append(texture)
             
             data['materials'].append(material)
-        
-            
+                
     return data
 
 def get_bone_by_name_(bones, name):
@@ -895,14 +998,14 @@ def append_atomic(frameIndex,geometryIndex, particle_data, bone_type_data):  #At
     atomic["extension"] = {} 
 
     # Bone Match prüfen
-    if bone_type_data != []:
+    if bone_type_data is not None and bone_type_data != []:
         for bone_data in bone_type_data:
             if str(frameIndex) == bone_data['index']:
                 atomic["extension"] = {"MaterialFXAtomic_EffectsEnabled": True}
                 return atomic
 
     # Particle Match prüfen
-    if particle_data != []:
+    if particle_data is not None and particle_data != []:
         for particle in particle_data:
             if str(frameIndex) == particle['name']:
                 atomic["extension"] =  PARTICLE_EFFECT_LUT["SMOKE"]
@@ -911,7 +1014,7 @@ def append_atomic(frameIndex,geometryIndex, particle_data, bone_type_data):  #At
     return atomic
     
 
-def get_json_rigid(bone_type_data, particle_data):
+def get_json_rigid(bone_type_data, particle_data, material_data):
     print("get_json_rigid-Func")
     # armature must be selected!
 
@@ -1014,7 +1117,7 @@ def get_json_rigid(bone_type_data, particle_data):
 
         frameRestMatrix = mat
 
-        clump["geometries"].append(new_mesh_obj_to_json(mesh, frameRestMatrix.inverted(), bone_type_data))
+        clump["geometries"].append(new_mesh_obj_to_json(mesh, frameRestMatrix.inverted(), bone_type_data, material_data))
         # print("Geometrie-Data {}: {}".format(mesh, clump["geometries"])) # --Debug
         # add geometry to atomics
         atomic = append_atomic(frameIndex,geometryIndex, particle_data, bone_type_data)
@@ -1080,7 +1183,7 @@ class ModelExporterDFF(Operator, ExportHelper):
     filename_ext = ".dff"
 
     def execute(self, context):
-        # Bone Daten exportieren
+        # Bone UserDaten exportieren
         bone_type_data = [
             {"index": bone.bone_index, "name": bone.bone_name, "type": bone.bone_type}
             for bone in context.scene.bone_items
@@ -1095,10 +1198,26 @@ class ModelExporterDFF(Operator, ExportHelper):
         ]
         if particle_data == []:
             particle_data = None;
-        
+            
+        # Material Daten exportieren
+        material_data = {
+            mat.mesh_name: {
+                "ambient": mat.ambient,
+                "specular": mat.specular,
+                "diffuse": mat.diffuse,
+                "snow_texture": mat.snow_texture,
+                "bin_mesh_data": mat.bin_mesh_data
+            }
+            for mat in context.scene.material_tool_items
+        }
+
+        if not material_data:
+            material_data = None
+
         print("[DEBUG] Exporting with bone data: {}".format(bone_type_data))
         print("[DEBUG] Exporting with particle data: {}".format(particle_data))
-        write_model(self.filepath, bone_type_data, particle_data)  # Deine Exportfunktion
+        print("[DEBUG] Exporting with material data: {}".format(material_data))
+        write_model(self.filepath, bone_type_data, particle_data, material_data)  # Deine Exportfunktion
         return {'FINISHED'}
 
 class ModelExporterJSON(Operator, ExportHelper):
@@ -1124,8 +1243,27 @@ class ModelExporterJSON(Operator, ExportHelper):
         ]
         if particle_data == []:
             particle_data = None;
-            
-        write_model(self.filepath, bone_type_data, particle_data)
+        
+        # Material Daten exportieren
+        material_data = {
+            mat.mesh_name: {
+                "ambient": mat.ambient,
+                "specular": mat.specular,
+                "diffuse": mat.diffuse,
+                "snow_texture": mat.snow_texture,
+                "bin_mesh_data": mat.bin_mesh_data
+            }
+            for mat in context.scene.material_tool_items
+        }
+
+        if not material_data:
+            material_data = None
+
+        print("[DEBUG] Exporting with bone data: {}".format(bone_type_data))
+        print("[DEBUG] Exporting with particle data: {}".format(particle_data))
+        print("[DEBUG] Exporting with material data: {}".format(material_data))
+        
+        write_model(self.filepath, bone_type_data, particle_data, material_data)
         return {'FINISHED'}
     
 #----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1172,7 +1310,7 @@ class BoneManagerPanel(Panel):
         layout = self.layout
 
         # UIList anzeigen
-        layout.label(text="Bones:")
+        layout.label(text="User-Data Bones (3dsmax User Properties):")
         row = layout.row()
         row.template_list(
             "DYNAMIC_UL_bone_list",  # ID der UIList
@@ -1300,7 +1438,7 @@ class ParticleEffectItem(PropertyGroup):
     """Repräsentiert einen Partikeleffekt-Eintrag"""
     bone_index = StringProperty(name="Bone Index", default="")
     effect_type = EnumProperty(
-        name="Effekt",
+        name="Effekte",
         items=[
             ('SMOKE', "SMOKE", "Erzeugt eine Rauchwolke am Bone mit passendem Index")
         ],
@@ -1333,7 +1471,7 @@ class PARTICLE_PT_tools(Panel):
     def draw(self, context):
         layout = self.layout
 
-        layout.label(text="Effekte:")
+        layout.label(text="Atomic-Effekte (ParticleStandard):")
         row = layout.row()
         row.template_list(
             "DYNAMIC_UL_particle_effect_list",
@@ -1377,24 +1515,34 @@ class PARTICLE_OT_remove_effect(Operator):
 # ---------------------------------------------------------------------------------------------------------------
 
 class MaterialToolItem(PropertyGroup):
+    mesh_name = StringProperty(name="Mesh Name", default="No data")
     ambient = BoolProperty(name="Ambient", default=True)
     specular = BoolProperty(name="Specular", default=False)
     diffuse = BoolProperty(name="Diffuse", default=True)
-    snow_texture = StringProperty(name="Snow Texture", default="")
-
+    snow_texture = StringProperty(name="Snow Texture", default="No data")
+    bin_mesh_data = StringProperty(name="BinMesh Data", default="No data")
 
 class MATERIAL_UL_tool_entries(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         if item is None:
             return
-        if self.layout_type in {'DEFAULT', 'COMPACT'}:
-            layout.prop(item, "ambient", text="Ambient")
-            layout.prop(item, "specular", text="Specular")
-            layout.prop(item, "diffuse", text="Diffuse")
-            layout.prop(item, "snow_texture", text="Tex")
-        elif self.layout_type in {'GRID'}:
-            layout.alignment = 'CENTER'
-            layout.label(text="Entry")
+        
+        box = layout.box()
+        box.alignment = 'LEFT'
+        # Meshname als editierbares Feld mit Label davor
+        row = box.row()
+        row.prop(item, "mesh_name", text="Mesh")
+        row.alignment = 'LEFT'
+
+        # Eigenschaften gruppiert
+        row = box.row(align=True)
+        row.prop(item, "ambient", text="Ambient")
+        row.prop(item, "specular", text="Specular")
+        row.prop(item, "diffuse", text="Diffuse")
+
+        row = box.row(align=True)
+        row.prop(item, "snow_texture", text="Texture")
+        row.prop(item, "bin_mesh_data", text="Bin-Mesh")
 
 
 
@@ -1407,6 +1555,7 @@ class MATERIAL_PT_tools(Panel):
 
     def draw(self, context):
         layout = self.layout
+        layout.label(text="Material Data:")
         scene = context.scene
 
         layout.template_list("MATERIAL_UL_tool_entries", "", scene, "material_tool_items", scene, "material_tool_index")
@@ -1741,9 +1890,9 @@ def read_model(path):
 
     read_json_rigid(js, False)
 
-def write_model(path,bone_type_data, particle_data):
+def write_model(path,bone_type_data, particle_data, material_data):
     print("write_model-Func")
-    js = get_json_rigid(bone_type_data, particle_data)
+    js = get_json_rigid(bone_type_data, particle_data, material_data)
     
     if path.endswith(".json"):
         with open(path, "w") as outfile:
@@ -1783,7 +1932,7 @@ if __name__ == "__main__":
     for text in bpy.data.texts:
         if text.name != keep_script:
             bpy.data.texts.remove(text)
-            
+         
             
 #  --------------------------------------------------------------------- LUTs -----------------------------------------------------------------
 
