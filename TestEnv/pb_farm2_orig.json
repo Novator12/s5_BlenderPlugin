@@ -1,4 +1,4 @@
- {
+{
   "clump": {
     "frames": [
       {
@@ -1880,70 +1880,10 @@
             "Flags": 3,
             "Emitters": [
               {
-                "EmitterClassId": 6719,
+                "ParticlePropsId": 64672,
+                "EmitterPropsId": 49328,
                 "EmitterFlags": 127,
-                "ParticleClassId": 6781,
                 "MaxParticlesPerBatch": 75,
-                "ParticleProps": {
-                  "Id": 64672,
-                  "Ids": [
-                    0,
-                    6,
-                    2,
-                    3,
-                    5,
-                    4,
-                    16777218,
-                    16777220,
-                    16777221
-                  ],
-                  "Data": [
-                    16,
-                    12,
-                    32,
-                    32,
-                    32,
-                    8,
-                    112,
-                    164,
-                    64
-                  ]
-                },
-                "EmitterProps": {
-                  "Id": 49328,
-                  "Ids": [
-                    0,
-                    1,
-                    2,
-                    3,
-                    6,
-                    5,
-                    4,
-                    16777218,
-                    16777220,
-                    16777221
-                  ],
-                  "Data": [
-                    40,
-                    172,
-                    64,
-                    64,
-                    52,
-                    32,
-                    16,
-                    140,
-                    348,
-                    92
-                  ]
-                },
-                "ParticleClass": {
-                  "Id": 6781,
-                  "PropertyId": 64672
-                },
-                "EmitterClass": {
-                  "Id": 6719,
-                  "PropertyId": 49328
-                },
                 "EmitterStandard": {
                   "Seed": 0,
                   "MaxParticles": 75,

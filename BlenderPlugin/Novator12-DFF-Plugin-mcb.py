@@ -1,6 +1,6 @@
-
 import bpy
 import os
+import sys
 import bmesh
 import os.path
 import mathutils as mu
@@ -21,10 +21,14 @@ from bpy.types import UIList
 from bpy.types import Panel
 from bpy.types import Operator
 from bpy_extras.io_utils import ExportHelper, ImportHelper
-from bpy.props import CollectionProperty, IntProperty,StringProperty, EnumProperty
+from bpy.props import CollectionProperty, IntProperty,StringProperty, EnumProperty, BoolProperty
 
 #Spherengenerator
 from mathutils import Vector
+
+#Zusatzskripte
+#from particle_effects_data import PARTICLE_EFFECT_LUT  #Aktivieren wenn Plugin
+
 
 
 # -------------------------------------------------------Import Functions------------------------------------------
@@ -151,7 +155,7 @@ def make_armature_from_frames(js_frames, use_connect):
 
     userDatas = []
 
-    for frameContainer in js_frames:
+    for index, frameContainer in enumerate(js_frames):
         frame = frameContainer["frame"];
         
         parent = frame['parentFrameIndex']
@@ -175,7 +179,7 @@ def make_armature_from_frames(js_frames, use_connect):
         if extension != None and "userDataPLG" in extension:
             userDataPLG = extension["userDataPLG"]
             userData = userDataPLG
-
+            
             #for property in userDataPLG:
                 #print(property)
                 #for value in userDataPLG[property]:
@@ -202,11 +206,13 @@ def make_armature_from_frames(js_frames, use_connect):
                     existing_ids = [b.bone_name for b in bpy.context.scene.bone_items]
                     if str(nodeID) not in existing_ids:
                         new_bone = bpy.context.scene.bone_items.add()
+                        new_bone.bone_index = str(index)
                         new_bone.bone_name = str(nodeID)
                         new_bone.bone_type = bone_type
+                        print("Neuer Bone gefunden: {}".format(new_bone))
                         bpy.context.scene.bone_active_index = len(bpy.context.scene.bone_items) - 1
 
-                        print("[DEBUG] AutoBoneManager: Hinzugefügt -> ID={}, Typ={}".format(nodeID, bone_type))
+                        print("[DEBUG] AutoBoneManager: Hinzugefügt -> ID={}, Typ={}, Index={}".format(nodeID, bone_type, index))
 
                 
         
@@ -375,7 +381,7 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
     bm.to_mesh(mesh)
     bm.free()
 
-    mesh_o = bpy.data.objects.new("mesh_", mesh)
+    mesh_o = bpy.data.objects.new("Mesh", mesh)
 
     vgs = mesh_o.vertex_groups
 
@@ -673,6 +679,7 @@ def generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bon
                     found_bone = True  # Ein passender Bone wurde gefunden
                     bone_type = bone['type']
                     bone_id = bone['name']
+                    bone_index = bone['index']
                     if bone_type == 'DECAL':
                         extension['userDataPLG'] = {'3dsmax User Properties': ['decal=flat', 'Effect=BuildingDecalWithSnow']}
                     elif bone_type == 'BUILDING':
@@ -711,7 +718,7 @@ def generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bon
                 
                 extension['hanimPLG']['nodes'].append(node)
                 
-        print("Bone-{} Extension: {}".format(nodeIds[frameIndex],extension))
+
         frame["extension"] = extension
 
         frameList.append(frame)
@@ -746,7 +753,7 @@ def get_bone_index_by_bone_name(boneNames, name):
         if boneNames[i] == name:
             return i
         
-def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix):
+def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data):
     print("new_mesh_obj_to_json-Func")
     verts_local = [v.co for v in mesh_obj.data.vertices.values()]
 
@@ -819,8 +826,11 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix):
         data['format'] = 131251  # Mehr als ein UV-Layer
     else:
         data['format'] = 65591  # Nur ein UV-Layer
-    # 131251 bei mehr als einem UV Layer Novator
     
+    if not mesh_obj.data.materials: #Wenn leeres Mesh stuff erledigen
+        data['format'] = 0
+        data['extension'] = {}
+        data['extension']['BinMeshPLG'] = {"Flags":0, "Meshes": []}
     
     data['triangles'] = []
     for face in mesh_obj.data.polygons:
@@ -848,14 +858,24 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix):
             material['color']['r'] = 255
             material['color']['g'] = 255
             material['color']['b'] = 255
+            material['UnknownInt1'] = 0
+            material['UnknownInt2'] = 237627844
+            material["SurfaceProps"] = {"ambient": 1,"specular": 0,"diffuse": 1}
+            material["extension"] = {}
+            
             material['textures'] = []
             texture = OrderedDict()
             texture["texture"] = re.sub(r'\.\d+$', '', mat.name)  # Vereinheitlichung der texturen Novator12
             texture["textureAlpha"] = ""
+            texture["FilterAddressing"] = 4358
+            texture["UnusedInt1"] = 0
+            texture["extension"] = {}
+            
             
             material['textures'].append(texture)
             
             data['materials'].append(material)
+        
             
     return data
 
@@ -864,12 +884,34 @@ def get_bone_by_name_(bones, name):
         if bone.name == name:
             return bone
         
-def append_atomic(frameIndex,geometryIndex):
+def append_atomic(frameIndex,geometryIndex, particle_data, bone_type_data):  #Atomic-Func Novator
+    print("append_atomic-Func")
+
     atomic = OrderedDict()
     atomic["frameIndex"] = frameIndex
     atomic["geometryIndex"] = geometryIndex
+    atomic["Flags"] = 5
+    atomic["UnknownInt1"] = 0 # ggf. noch anpassen wenn bekannt
+    atomic["extension"] = {} 
 
-def get_json_rigid(bone_type_data):
+    # Bone Match prüfen
+    if bone_type_data != []:
+        for bone_data in bone_type_data:
+            if str(frameIndex) == bone_data['index']:
+                atomic["extension"] = {"MaterialFXAtomic_EffectsEnabled": True}
+                return atomic
+
+    # Particle Match prüfen
+    if particle_data != []:
+        for particle in particle_data:
+            if str(frameIndex) == particle['name']:
+                atomic["extension"] =  PARTICLE_EFFECT_LUT["SMOKE"]
+                return atomic
+    
+    return atomic
+    
+
+def get_json_rigid(bone_type_data, particle_data):
     print("get_json_rigid-Func")
     # armature must be selected!
 
@@ -972,10 +1014,10 @@ def get_json_rigid(bone_type_data):
 
         frameRestMatrix = mat
 
-        clump["geometries"].append(new_mesh_obj_to_json(mesh, frameRestMatrix.inverted()))
+        clump["geometries"].append(new_mesh_obj_to_json(mesh, frameRestMatrix.inverted(), bone_type_data))
         # print("Geometrie-Data {}: {}".format(mesh, clump["geometries"])) # --Debug
         # add geometry to atomics
-        atomic = append_atomic(frameIndex,geometryIndex)
+        atomic = append_atomic(frameIndex,geometryIndex, particle_data, bone_type_data)
 
         clump["atomics"].append(atomic)
         
@@ -1038,16 +1080,25 @@ class ModelExporterDFF(Operator, ExportHelper):
     filename_ext = ".dff"
 
     def execute(self, context):
-        # Daten exportieren
+        # Bone Daten exportieren
         bone_type_data = [
-            {"name": bone.bone_name, "type": bone.bone_type}
+            {"index": bone.bone_index, "name": bone.bone_name, "type": bone.bone_type}
             for bone in context.scene.bone_items
         ]
         if bone_type_data == []:
             bone_type_data = None;
         
-        #print("[DEBUG] Exporting with bone data: {}".format(bone_type_data))
-        write_model(self.filepath, bone_type_data)  # Deine Exportfunktion
+        # Partikel Daten exportieren
+        particle_data = [
+            {"name": particle.bone_index, "type": particle.effect_type}
+            for particle in context.scene.particle_effects
+        ]
+        if particle_data == []:
+            particle_data = None;
+        
+        print("[DEBUG] Exporting with bone data: {}".format(bone_type_data))
+        print("[DEBUG] Exporting with particle data: {}".format(particle_data))
+        write_model(self.filepath, bone_type_data, particle_data)  # Deine Exportfunktion
         return {'FINISHED'}
 
 class ModelExporterJSON(Operator, ExportHelper):
@@ -1060,13 +1111,21 @@ class ModelExporterJSON(Operator, ExportHelper):
             )
     def execute(self, context):
         bone_type_data = [
-            {"name": bone.bone_name, "type": bone.bone_type}
+            {"index": bone.bone_index, "name": bone.bone_name, "type": bone.bone_type}
             for bone in context.scene.bone_items
         ]
         if bone_type_data == []:
             bone_type_data = None;
         
-        write_model(self.filepath, bone_type_data)
+         # Partikel Daten exportieren
+        particle_data = [
+            {"name": particle.bone_index, "type": particle.effect_type}
+            for particle in context.scene.particle_effects
+        ]
+        if particle_data == []:
+            particle_data = None;
+            
+        write_model(self.filepath, bone_type_data, particle_data)
         return {'FINISHED'}
     
 #----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1074,6 +1133,7 @@ class ModelExporterJSON(Operator, ExportHelper):
 
 class DynamicBoneItem(PropertyGroup):
     """Repräsentiert einen Bone-Eintrag"""
+    bone_index = StringProperty(name="Bone Index", default="")
     bone_name = StringProperty(name="Bone Name", default="")
     bone_type = EnumProperty(
         name="Type",
@@ -1092,6 +1152,7 @@ class DynamicBoneListUIList(UIList):
 
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            layout.prop(item, "bone_index", text="Idx")
             layout.prop(item, "bone_name", text="Num")
             layout.prop(item, "bone_type", text="Mat")
         elif self.layout_type in {'GRID'}:
@@ -1132,7 +1193,8 @@ class AddBoneItem(Operator):
 
     def execute(self, context):
         new_bone = context.scene.bone_items.add()
-        new_bone.bone_name = "New Bone"
+        new_bone.bone_index = "999"
+        new_bone.bone_name = "999"
         new_bone.bone_type = 'DECAL'
         context.scene.bone_active_index = len(context.scene.bone_items) - 1
         return {'FINISHED'}
@@ -1292,7 +1354,7 @@ class PARTICLE_OT_add_effect(Operator):
 
     def execute(self, context):
         new_effect = context.scene.particle_effects.add()
-        new_effect.bone_index = 0
+        new_effect.bone_index = "999"
         new_effect.effect_type = 'SMOKE'
         context.scene.particle_effects_index = len(context.scene.particle_effects) - 1
         return {'FINISHED'}
@@ -1311,6 +1373,69 @@ class PARTICLE_OT_remove_effect(Operator):
         return {'FINISHED'}
 
 
+# ---------------------------------------------- Novator Material Menü ------------------------------------------
+# ---------------------------------------------------------------------------------------------------------------
+
+class MaterialToolItem(PropertyGroup):
+    ambient = BoolProperty(name="Ambient", default=True)
+    specular = BoolProperty(name="Specular", default=False)
+    diffuse = BoolProperty(name="Diffuse", default=True)
+    snow_texture = StringProperty(name="Snow Texture", default="")
+
+
+class MATERIAL_UL_tool_entries(UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        if item is None:
+            return
+        if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            layout.prop(item, "ambient", text="Ambient")
+            layout.prop(item, "specular", text="Specular")
+            layout.prop(item, "diffuse", text="Diffuse")
+            layout.prop(item, "snow_texture", text="Tex")
+        elif self.layout_type in {'GRID'}:
+            layout.alignment = 'CENTER'
+            layout.label(text="Entry")
+
+
+
+class MATERIAL_PT_tools(Panel):
+    bl_idname = "VIEW3D_PT_material_tools"
+    bl_label = "Material Tools"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Material Tools'
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+
+        layout.template_list("MATERIAL_UL_tool_entries", "", scene, "material_tool_items", scene, "material_tool_index")
+
+        row = layout.row()
+        row.operator("material_tools.add_entry", text="Add Material", icon="PLUS")
+        row.operator("material_tools.remove_entry", text="Remove Material", icon="X")
+
+
+class MATERIAL_OT_add_entry(Operator):
+    bl_idname = "material_tools.add_entry"
+    bl_label = "Add Entry"
+
+    def execute(self, context):
+        context.scene.material_tool_items.add()
+        context.scene.material_tool_index = len(context.scene.material_tool_items) - 1
+        return {'FINISHED'}
+
+
+class MATERIAL_OT_remove_entry(Operator):
+    bl_idname = "material_tools.remove_entry"
+    bl_label = "Remove Entry"
+
+    def execute(self, context):
+        index = context.scene.material_tool_index
+        if 0 <= index < len(context.scene.material_tool_items):
+            context.scene.material_tool_items.remove(index)
+            context.scene.material_tool_index = min(index, len(context.scene.material_tool_items) - 1)
+        return {'FINISHED'}
 
 
 # ---------------------------------------------- Register/ Unregister Classes -----------------------------------
@@ -1421,7 +1546,12 @@ def register():
             PARTICLE_UL_effects,
             PARTICLE_PT_tools,
             PARTICLE_OT_add_effect,
-            PARTICLE_OT_remove_effect
+            PARTICLE_OT_remove_effect,
+            MaterialToolItem,
+            MATERIAL_UL_tool_entries,
+            MATERIAL_PT_tools,
+            MATERIAL_OT_add_entry,
+            MATERIAL_OT_remove_entry
         )
         for cls in classes:
             print("[DEBUG] Registering class: {}".format(cls.__name__))
@@ -1447,7 +1577,12 @@ def register():
             PARTICLE_UL_effects,
             PARTICLE_PT_tools,
             PARTICLE_OT_add_effect,
-            PARTICLE_OT_remove_effect
+            PARTICLE_OT_remove_effect,
+            MaterialToolItem,
+            MATERIAL_UL_tool_entries,
+            MATERIAL_PT_tools,
+            MATERIAL_OT_add_entry,
+            MATERIAL_OT_remove_entry
         )
         for cls in custom_classes:
             print("[DEBUG] Registering class: {}".format(cls.__name__))
@@ -1469,6 +1604,17 @@ def register():
         if not hasattr(bpy.types.Scene, "particle_effects_index"):
             bpy.types.Scene.particle_effects_index = IntProperty(default=0)
             print("[DEBUG] Registered Scene.particle_effects_index")
+            
+        if not hasattr(bpy.types.Scene, "material_tool_items"):
+            bpy.types.Scene.material_tool_items = CollectionProperty(type=MaterialToolItem)
+            print("[DEBUG] Registered Scene.material_tool_items")
+
+        if not hasattr(bpy.types.Scene, "material_tool_index"):
+            bpy.types.Scene.material_tool_index = IntProperty(default=0)
+            print("[DEBUG] Registered Scene.material_tool_index")
+            
+            
+            
         
         register_menu_functions()
 
@@ -1517,7 +1663,15 @@ def unregister():
         if hasattr(bpy.types.Scene, "particle_effect_index"):
             del bpy.types.Scene.particle_effect_index
             print("[DEBUG] Unregistered Scene.particle_effect_index")
-        
+            
+        if hasattr(bpy.types.Scene, "material_tool_items"):
+            del bpy.types.Scene.material_tool_items
+            print("[DEBUG] Unregistered Scene.material_tool_items")
+            
+        if hasattr(bpy.types.Scene, "material_tool_index"):
+            del bpy.types.Scene.material_tool_index
+            print("[DEBUG] Unregistered Scene.material_tool_index")
+            
         custom_classes = (
             DynamicBoneItem,
             DynamicBoneListUIList,
@@ -1587,32 +1741,35 @@ def read_model(path):
 
     read_json_rigid(js, False)
 
-def write_model(path,bone_type_data):
+def write_model(path,bone_type_data, particle_data):
     print("write_model-Func")
-    js = get_json_rigid(bone_type_data)
+    js = get_json_rigid(bone_type_data, particle_data)
     
     if path.endswith(".json"):
         with open(path, "w") as outfile:
             json.dump(js, outfile, indent=4)
     else:
         p = subprocess.Popen([get_converter_exe_location(),"--export"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        js_str = json.dumps(js)
-        bytes = js_str.encode('utf-8')
-        x = p.stdin.write(bytes)
-        
-        #print(x, len(bytes))
-        p.stdin.flush()
-        p.stdin.close()
 
-        outs, errs = p.communicate()
+        js_str = json.dumps(js)
+        bytes_data = js_str.encode('utf-8')
+
+        outs, errs = p.communicate(input=bytes_data)
+
+        if errs:
+            print("[Exporter STDERR]", errs.decode("utf-8"))
+
         
         #DEBUG: Eingabe in Datei schreiben
         with open("C:\\Program Files (x86)\\Ubisoft\\Blue Byte\\DIE SIEDLER - Das Erbe der Könige - Gold Edition\\GitRepo\\s5_BlenderPlugin\\TestEnv\\debug_export.json", "w", encoding="utf-8") as debugfile:
             debugfile.write(js_str)
             
         #Export
-        with open(path, "wb") as outfile:
-            outfile.write(outs)
+        try:
+            with open(path, "wb") as outfile:
+                outfile.write(outs)
+        except BrokenPipeError as e:
+            print("[ERROR] BrokenPipe beim Schreiben in Datei {path}: {}".format(e))
 
 if __name__ == "__main__":
     #Novator Test Stuff
@@ -1626,9 +1783,215 @@ if __name__ == "__main__":
     for text in bpy.data.texts:
         if text.name != keep_script:
             bpy.data.texts.remove(text)
-    
+            
+            
+#  --------------------------------------------------------------------- LUTs -----------------------------------------------------------------
 
-    #write_model("C:\\Users\\olive\Desktop\\Blender Dev Test\\Blender_Output\\Test_Res.json",[{'name': '415', 'type': 'BUILDING'}, {'name': '416', 'type': 'DECAL'}])
-    #write_model("C:\\Users\\olive\Desktop\\Blender Dev Test\\Blender_Output\\Test_Res.dff",[{'name': '415', 'type': 'BUILDING'}, {'name': '416', 'type': 'DECAL'}])
-    
-    
+    # particle_effects_data.py
+
+    PARTICLE_EFFECT_LUT = {
+        "SMOKE": {
+            "ParticleStandard": {
+                "Flags": 3,
+                "Emitters": [
+                    {
+                        "ParticlePropsId": 64672,
+                        "EmitterPropsId": 49328,
+                        "EmitterFlags": 127,
+                        "MaxParticlesPerBatch": 75,
+                        "EmitterStandard": {
+                            "Seed": 0,
+                            "MaxParticles": 75,
+                            "Force": {
+                                "x": 50.71419,
+                                "y": -5.2453665E-06,
+                                "z": -108.756935
+                            },
+                            "EmitterPosition": {"x": 0, "y": 0, "z": 0},
+                            "EmitterSize": {"x": 0.5, "y": 0.5, "z": 0.5},
+                            "TimeBetweenEmissions": 0.5,
+                            "TimeBetweenEmissionsRandom": 0.33333334,
+                            "NumParticlesPerEmission": 5,
+                            "NumParticlesPerEmissionRandom": 1,
+                            "InitialVelocity": 200,
+                            "InitialVelocityRandom": 100,
+                            "ParticleLife": 2,
+                            "ParticleLifeRandom": 0.33333334,
+                            "InitialDirection": {"x": 0, "y": 0, "z": 32},
+                            "InitialDirectionRandom": {"x": 2, "y": 2, "z": 0.02},
+                            "ParticleSize": {"x": 1, "y": 1, "z": -2.3509886e-38},
+                            "Color": {"red": 128, "green": 255, "blue": 255, "alpha": 255},
+                            "TextureCoordinates": [
+                                {"x": 0, "y": 0},
+                                {"x": 1, "y": 1},
+                                {"x": 1.33e-42, "y": 1.309e-42},
+                                {"x": 1.345e-42, "y": 1.28e-42}
+                            ],
+                            "ParticleTexture": {
+                                "texture": "smoke10",
+                                "textureAlpha": "",
+                                "FilterAddressing": 4358,
+                                "UnusedInt1": 0,
+                                "extension": {}
+                            },
+                            "ParticleRotation": 0
+                        },
+                        "Color": {
+                            "StartColor": {"red": 38, "green": 38, "blue": 38, "alpha": 127.5},
+                            "StartColorRandom": {"red": 0, "green": 0, "blue": 0, "alpha": 0},
+                            "EndColor": {"red": 69, "green": 69, "blue": 69, "alpha": 25.5},
+                            "EndColorRandom": {"red": 0, "green": 0, "blue": 0, "alpha": 0}
+                        },
+                        "TextureCoordinates": {
+                            "StartUV0": {"x": 0, "y": 0},
+                            "StartUV0Random": {"x": 0, "y": 0},
+                            "EndUV0": {"x": 0.90000004, "y": 0},
+                            "EndUV0Random": {"x": 0, "y": 0},
+                            "StartUV1": {"x": 0.1, "y": 1},
+                            "StartUV1Random": {"x": 0, "y": 0},
+                            "EndUV1": {"x": 1, "y": 1},
+                            "EndUV1Random": {"x": 0, "y": 0}
+                        },
+                        "Matrix": None,
+                        "ParticleSize": {
+                            "StartSize": {"x": 50, "y": 50},
+                            "StartSizeRandom": {"x": 0, "y": 0},
+                            "EndSize": {"x": 300, "y": 600},
+                            "EndSizeRandom": {"x": 200, "y": 400}
+                        },
+                        "Rotate": {
+                            "StartRotate": 0,
+                            "StartRotateRandom": 5,
+                            "EndRotate": 0,
+                            "EndRotateRandom": 45
+                        },
+                        "Tank": {
+                            "UpdateFlags": -1,
+                            "EmitterFlags": -1,
+                            "SourceBlend": 2,
+                            "DestinationBlend": 2,
+                            "VertexAlphaBlending": True
+                        },
+                        "AdvPointList": None,
+                        "AdvCircle": None,
+                        "AdvSphere": None,
+                        "AdvEmittingEmitter": None,
+                        "AdvMultiColor": {
+                            "List": [
+                                {
+                                    "Time": 0.1,
+                                    "TimeBias": 0,
+                                    "MidColor": {"red": 38, "green": 38, "blue": 38, "alpha": 127.5},
+                                    "MidColorBias": {"red": 2, "green": 2, "blue": 2, "alpha": 0}
+                                },
+                                {
+                                    "Time": 0.25,
+                                    "TimeBias": 0,
+                                    "MidColor": {"red": 38, "green": 38, "blue": 38, "alpha": 127.5},
+                                    "MidColorBias": {"red": 0, "green": 0, "blue": 0, "alpha": 0}
+                                },
+                                {
+                                    "Time": 0.5,
+                                    "TimeBias": 0,
+                                    "MidColor": {"red": 55.000004, "green": 55.000004, "blue": 55.000004, "alpha": 51},
+                                    "MidColorBias": {"red": 0, "green": 0, "blue": 0, "alpha": 0}
+                                }
+                            ]
+                        },
+                        "AdvMultiTexCoords": None,
+                        "AdvMultiSize": {
+                            "List": [
+                                {
+                                    "Time": 0.2,
+                                    "TimeBias": 0,
+                                    "MidSize": {"x": 150, "y": 200},
+                                    "MidSizeBias": {"x": 100, "y": 140}
+                                },
+                                {
+                                    "Time": 0.5,
+                                    "TimeBias": 0,
+                                    "MidSize": {"x": 200, "y": 300},
+                                    "MidSizeBias": {"x": 100, "y": 400}
+                                },
+                                {
+                                    "Time": 0.75,
+                                    "TimeBias": 0,
+                                    "MidSize": {"x": 200, "y": 500},
+                                    "MidSizeBias": {"x": 200, "y": 400}
+                                }
+                            ]
+                        },
+                        "AdvMultiTexCoordsStep": {
+                            "List": [
+                                {
+                                    "Time": 0.1,
+                                    "TimeBias": 0,
+                                    "MidUV0": {"u": 0.1, "v": 0},
+                                    "MidUV0Bias": {"u": 0, "v": 0},
+                                    "MidUV1": {"u": 0.2, "v": 1},
+                                    "MidUV1Bias": {"u": 0, "v": 0}
+                                },
+                                {
+                                    "Time": 0.2,
+                                    "TimeBias": 0,
+                                    "MidUV0": {"u": 0.2, "v": 0},
+                                    "MidUV0Bias": {"u": 0, "v": 0},
+                                    "MidUV1": {"u": 0.3, "v": 1},
+                                    "MidUV1Bias": {"u": 0, "v": 0}
+                                },
+                                {
+                                    "Time": 0.3,
+                                    "TimeBias": 0,
+                                    "MidUV0": {"u": 0.3, "v": 0},
+                                    "MidUV0Bias": {"u": 0, "v": 0},
+                                    "MidUV1": {"u": 0.4, "v": 1},
+                                    "MidUV1Bias": {"u": 0, "v": 0}
+                                },
+                                {
+                                    "Time": 0.4,
+                                    "TimeBias": 0,
+                                    "MidUV0": {"u": 0.4, "v": 0},
+                                    "MidUV0Bias": {"u": 0, "v": 0},
+                                    "MidUV1": {"u": 0.5, "v": 1},
+                                    "MidUV1Bias": {"u": 0, "v": 0}
+                                },
+                                {
+                                    "Time": 0.5,
+                                    "TimeBias": 0,
+                                    "MidUV0": {"u": 0.5, "v": 0},
+                                    "MidUV0Bias": {"u": 0, "v": 0},
+                                    "MidUV1": {"u": 0.6, "v": 1},
+                                    "MidUV1Bias": {"u": 0, "v": 0}
+                                },
+                                {
+                                    "Time": 0.6,
+                                    "TimeBias": 0,
+                                    "MidUV0": {"u": 0.6, "v": 0},
+                                    "MidUV0Bias": {"u": 0, "v": 0},
+                                    "MidUV1": {"u": 0.7, "v": 1},
+                                    "MidUV1Bias": {"u": 0, "v": 0}
+                                },
+                                {
+                                    "Time": 0.7,
+                                    "TimeBias": 0,
+                                    "MidUV0": {"u": 0.7, "v": 0},
+                                    "MidUV0Bias": {"u": 0, "v": 0},
+                                    "MidUV1": {"u": 0.8, "v": 1},
+                                    "MidUV1Bias": {"u": 0, "v": 0}
+                                },
+                                {
+                                    "Time": 0.8,
+                                    "TimeBias": 0,
+                                    "MidUV0": {"u": 0.8, "v": 0},
+                                    "MidUV0Bias": {"u": 0, "v": 0},
+                                    "MidUV1": {"u": 0.90000004, "v": 1},
+                                    "MidUV1Bias": {"u": 0, "v": 0}
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+
+    }
