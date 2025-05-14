@@ -1,0 +1,109 @@
+{
+  "ParticlePropsId": 10304,
+  "EmitterPropsId": 19552,
+  "EmitterFlags": 127,
+  "MaxParticlesPerBatch": 600,
+  "EmitterStandard": {
+    "Seed": 1,
+    "MaxParticles": 600,
+    "Force": {
+      "x": 0,
+      "y": 0,
+      "z": -300
+    },
+    "EmitterPosition": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "EmitterSize": {
+      "x": 119.2955,
+      "y": 119.2955,
+      "z": 119.2955
+    },
+    "TimeBetweenEmissions": 0.033333335,
+    "TimeBetweenEmissionsRandom": 0,
+    "NumParticlesPerEmission": 5,
+    "NumParticlesPerEmissionRandom": 0,
+    "InitialVelocity": 100,
+    "InitialVelocityRandom": 74.550385,
+    "ParticleLife": 0.6666667,
+    "ParticleLifeRandom": 0.33333334,
+    "InitialDirection": {
+      "x": 0,
+      "y": 0,
+      "z": 1
+    },
+    "InitialDirectionRandom": {
+      "x": 0.1,
+      "y": 0.1,
+      "z": 0
+    },
+    "ParticleSize": {
+      "x": 10,
+      "y": 7
+    },
+    "ParticleSize_SeriMisstake": 2147483647,
+    "Color": {
+      "red": 127,
+      "green": 255,
+      "blue": 255,
+      "alpha": 255
+    },
+    "TextureCoordinates": [
+      {
+        "x": 0,
+        "y": 0
+      },
+      {
+        "x": 1,
+        "y": 1
+      },
+      {
+        "x": 1.8E-44,
+        "y": 1.5E-44
+      },
+      {
+        "x": 6.6E-44,
+        "y": 2.17E-43
+      }
+    ],
+    "ParticleTexture": {
+      "texture": "woodchip",
+      "textureAlpha": "",
+      "FilterAddressing": 4358,
+      "UnusedInt1": 0,
+      "extension": {}
+    },
+    "ParticleRotation": 0
+  },
+  "Color": null,
+  "TextureCoordinates": null,
+  "Matrix": null,
+  "ParticleSize": null,
+  "Rotate": {
+    "StartRotate": 0,
+    "StartRotateRandom": 90,
+    "EndRotate": 90,
+    "EndRotateRandom": 180
+  },
+  "Tank": {
+    "UpdateFlags": -1,
+    "EmitterFlags": -1,
+    "SourceBlend": 2,
+    "DestinationBlend": 2,
+    "VertexAlphaBlending": true
+  },
+  "AdvPointList": null,
+  "AdvCircle": null,
+  "AdvSphere": {
+    "Radius": 3.7277482,
+    "RadiusGap": 0.5,
+    "UseSphereEmission": true
+  },
+  "AdvEmittingEmitter": null,
+  "AdvMultiColor": null,
+  "AdvMultiTexCoords": null,
+  "AdvMultiSize": null,
+  "AdvMultiTexCoordsStep": null
+}

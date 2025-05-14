@@ -1,0 +1,317 @@
+{
+  "ParticlePropsId": 18528,
+  "EmitterPropsId": 60544,
+  "EmitterFlags": 127,
+  "MaxParticlesPerBatch": 10,
+  "EmitterStandard": {
+    "Seed": 0,
+    "MaxParticles": 10,
+    "Force": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "EmitterPosition": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "EmitterSize": {
+      "x": 0.49999997,
+      "y": 0.50000006,
+      "z": 0.49999997
+    },
+    "TimeBetweenEmissions": 0.1,
+    "TimeBetweenEmissionsRandom": 0.1,
+    "NumParticlesPerEmission": 1,
+    "NumParticlesPerEmissionRandom": 0,
+    "InitialVelocity": 30.000004,
+    "InitialVelocityRandom": 20.000002,
+    "ParticleLife": 1.3333334,
+    "ParticleLifeRandom": 0.33333334,
+    "InitialDirection": {
+      "x": 0,
+      "y": 0,
+      "z": 0.99999994
+    },
+    "InitialDirectionRandom": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "ParticleSize": {
+      "x": 1,
+      "y": 1
+    },
+    "ParticleSize_SeriMisstake": 265485567,
+    "Color": {
+      "red": 15,
+      "green": 210,
+      "blue": 252,
+      "alpha": 255
+    },
+    "TextureCoordinates": [
+      {
+        "x": 0,
+        "y": 0
+      },
+      {
+        "x": 1,
+        "y": 1
+      },
+      {
+        "x": 1.0010229E-38,
+        "y": 1.0653053E-38
+      },
+      {
+        "x": 1.0193785E-38,
+        "y": 2.938879E-39
+      }
+    ],
+    "ParticleTexture": {
+      "texture": "smoke10",
+      "textureAlpha": "",
+      "FilterAddressing": 4358,
+      "UnusedInt1": 0,
+      "extension": {}
+    },
+    "ParticleRotation": 0
+  },
+  "Color": null,
+  "TextureCoordinates": {
+    "StartUV0": {
+      "x": 0,
+      "y": 0
+    },
+    "StartUV0Random": {
+      "x": 0,
+      "y": 0
+    },
+    "EndUV0": {
+      "x": 0.90000004,
+      "y": 0
+    },
+    "EndUV0Random": {
+      "x": 0,
+      "y": 0
+    },
+    "StartUV1": {
+      "x": 0.1,
+      "y": 1
+    },
+    "StartUV1Random": {
+      "x": 0,
+      "y": 0
+    },
+    "EndUV1": {
+      "x": 1,
+      "y": 1
+    },
+    "EndUV1Random": {
+      "x": 0,
+      "y": 0
+    }
+  },
+  "Matrix": null,
+  "ParticleSize": {
+    "StartSize": {
+      "x": 200,
+      "y": 200
+    },
+    "StartSizeRandom": {
+      "x": 0,
+      "y": 0
+    },
+    "EndSize": {
+      "x": 500,
+      "y": 500
+    },
+    "EndSizeRandom": {
+      "x": 20,
+      "y": 1
+    }
+  },
+  "Rotate": null,
+  "Tank": {
+    "UpdateFlags": -1,
+    "EmitterFlags": -1,
+    "SourceBlend": 2,
+    "DestinationBlend": 2,
+    "VertexAlphaBlending": true
+  },
+  "AdvPointList": null,
+  "AdvCircle": null,
+  "AdvSphere": {
+    "Radius": 7.601478,
+    "RadiusGap": 0.5,
+    "UseSphereEmission": true
+  },
+  "AdvEmittingEmitter": null,
+  "AdvMultiColor": null,
+  "AdvMultiTexCoords": null,
+  "AdvMultiSize": null,
+  "AdvMultiTexCoordsStep": {
+    "List": [
+      {
+        "Time": 0.1,
+        "TimeBias": 0,
+        "MidUV0": {
+          "u": 0.1,
+          "v": 0
+        },
+        "MidUV0Bias": {
+          "u": 0,
+          "v": 0
+        },
+        "MidUV1": {
+          "u": 0.2,
+          "v": 1
+        },
+        "MidUV1Bias": {
+          "u": 0,
+          "v": 0
+        }
+      },
+      {
+        "Time": 0.2,
+        "TimeBias": 0,
+        "MidUV0": {
+          "u": 0.2,
+          "v": 0
+        },
+        "MidUV0Bias": {
+          "u": 0,
+          "v": 0
+        },
+        "MidUV1": {
+          "u": 0.3,
+          "v": 1
+        },
+        "MidUV1Bias": {
+          "u": 0,
+          "v": 0
+        }
+      },
+      {
+        "Time": 0.3,
+        "TimeBias": 0,
+        "MidUV0": {
+          "u": 0.3,
+          "v": 0
+        },
+        "MidUV0Bias": {
+          "u": 0,
+          "v": 0
+        },
+        "MidUV1": {
+          "u": 0.4,
+          "v": 1
+        },
+        "MidUV1Bias": {
+          "u": 0,
+          "v": 0
+        }
+      },
+      {
+        "Time": 0.4,
+        "TimeBias": 0,
+        "MidUV0": {
+          "u": 0.4,
+          "v": 0
+        },
+        "MidUV0Bias": {
+          "u": 0,
+          "v": 0
+        },
+        "MidUV1": {
+          "u": 0.5,
+          "v": 1
+        },
+        "MidUV1Bias": {
+          "u": 0,
+          "v": 0
+        }
+      },
+      {
+        "Time": 0.5,
+        "TimeBias": 0,
+        "MidUV0": {
+          "u": 0.5,
+          "v": 0
+        },
+        "MidUV0Bias": {
+          "u": 0,
+          "v": 0
+        },
+        "MidUV1": {
+          "u": 0.6,
+          "v": 1
+        },
+        "MidUV1Bias": {
+          "u": 0,
+          "v": 0
+        }
+      },
+      {
+        "Time": 0.6,
+        "TimeBias": 0,
+        "MidUV0": {
+          "u": 0.6,
+          "v": 0
+        },
+        "MidUV0Bias": {
+          "u": 0,
+          "v": 0
+        },
+        "MidUV1": {
+          "u": 0.7,
+          "v": 1
+        },
+        "MidUV1Bias": {
+          "u": 0,
+          "v": 0
+        }
+      },
+      {
+        "Time": 0.7,
+        "TimeBias": 0,
+        "MidUV0": {
+          "u": 0.7,
+          "v": 0
+        },
+        "MidUV0Bias": {
+          "u": 0,
+          "v": 0
+        },
+        "MidUV1": {
+          "u": 0.8,
+          "v": 1
+        },
+        "MidUV1Bias": {
+          "u": 0,
+          "v": 0
+        }
+      },
+      {
+        "Time": 0.8,
+        "TimeBias": 0,
+        "MidUV0": {
+          "u": 0.8,
+          "v": 0
+        },
+        "MidUV0Bias": {
+          "u": 0,
+          "v": 0
+        },
+        "MidUV1": {
+          "u": 0.90000004,
+          "v": 1
+        },
+        "MidUV1Bias": {
+          "u": 0,
+          "v": 0
+        }
+      }
+    ]
+  }
+}

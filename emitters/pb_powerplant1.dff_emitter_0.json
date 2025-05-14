@@ -1,0 +1,212 @@
+{
+  "ParticlePropsId": 19568,
+  "EmitterPropsId": 60560,
+  "EmitterFlags": 127,
+  "MaxParticlesPerBatch": 41,
+  "EmitterStandard": {
+    "Seed": 1,
+    "MaxParticles": 41,
+    "Force": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "EmitterPosition": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "EmitterSize": {
+      "x": 32.68158,
+      "y": 32.68158,
+      "z": 60.227192
+    },
+    "TimeBetweenEmissions": 0,
+    "TimeBetweenEmissionsRandom": 0,
+    "NumParticlesPerEmission": 13,
+    "NumParticlesPerEmissionRandom": 23,
+    "InitialVelocity": 0,
+    "InitialVelocityRandom": 20,
+    "ParticleLife": 0.06666667,
+    "ParticleLifeRandom": 0.13333334,
+    "InitialDirection": {
+      "x": 2.27,
+      "y": 0,
+      "z": 1
+    },
+    "InitialDirectionRandom": {
+      "x": 0.5,
+      "y": 0.5,
+      "z": 0.5
+    },
+    "ParticleSize": {
+      "x": 200,
+      "y": 60
+    },
+    "ParticleSize_SeriMisstake": -2130706433,
+    "Color": {
+      "red": 128,
+      "green": 255,
+      "blue": 255,
+      "alpha": 255
+    },
+    "TextureCoordinates": [
+      {
+        "x": 0,
+        "y": 0
+      },
+      {
+        "x": 1,
+        "y": 1
+      },
+      {
+        "x": 4.65E-43,
+        "y": 6.383398E-10
+      },
+      {
+        "x": 6.82E-43,
+        "y": 4.59184E-40
+      }
+    ],
+    "ParticleTexture": {
+      "texture": "PB_Weathermachine_lightning",
+      "textureAlpha": "",
+      "FilterAddressing": 4358,
+      "UnusedInt1": 0,
+      "extension": {}
+    },
+    "ParticleRotation": 0
+  },
+  "Color": {
+    "StartColor": {
+      "red": 255,
+      "green": 255,
+      "blue": 255,
+      "alpha": 204
+    },
+    "StartColorRandom": {
+      "red": 0,
+      "green": 0,
+      "blue": 0,
+      "alpha": 0
+    },
+    "EndColor": {
+      "red": 84,
+      "green": 59.000004,
+      "blue": 211.00002,
+      "alpha": 127.5
+    },
+    "EndColorRandom": {
+      "red": 0,
+      "green": 0,
+      "blue": 0,
+      "alpha": 0
+    }
+  },
+  "TextureCoordinates": {
+    "StartUV0": {
+      "x": 0,
+      "y": 0
+    },
+    "StartUV0Random": {
+      "x": 0,
+      "y": 0
+    },
+    "EndUV0": {
+      "x": 0,
+      "y": 0.75
+    },
+    "EndUV0Random": {
+      "x": 0,
+      "y": 0
+    },
+    "StartUV1": {
+      "x": 1,
+      "y": 0.25
+    },
+    "StartUV1Random": {
+      "x": 0,
+      "y": 0
+    },
+    "EndUV1": {
+      "x": 1,
+      "y": 1
+    },
+    "EndUV1Random": {
+      "x": 0,
+      "y": 0
+    }
+  },
+  "Matrix": null,
+  "ParticleSize": null,
+  "Rotate": {
+    "StartRotate": 30,
+    "StartRotateRandom": 30,
+    "EndRotate": 30,
+    "EndRotateRandom": 30
+  },
+  "Tank": {
+    "UpdateFlags": -1,
+    "EmitterFlags": -1,
+    "SourceBlend": 2,
+    "DestinationBlend": 2,
+    "VertexAlphaBlending": true
+  },
+  "AdvPointList": null,
+  "AdvCircle": {
+    "Radius": 76.25696,
+    "RadiusGap": 0.5,
+    "Height": 60.227192,
+    "UseCircleEmission": false,
+    "DirRotation": 0
+  },
+  "AdvSphere": null,
+  "AdvEmittingEmitter": null,
+  "AdvMultiColor": null,
+  "AdvMultiTexCoords": null,
+  "AdvMultiSize": null,
+  "AdvMultiTexCoordsStep": {
+    "List": [
+      {
+        "Time": 0.25,
+        "TimeBias": 0,
+        "MidUV0": {
+          "u": 0,
+          "v": 0.25
+        },
+        "MidUV0Bias": {
+          "u": 0,
+          "v": 0
+        },
+        "MidUV1": {
+          "u": 1,
+          "v": 0.5
+        },
+        "MidUV1Bias": {
+          "u": 0,
+          "v": 0
+        }
+      },
+      {
+        "Time": 0.5,
+        "TimeBias": 0,
+        "MidUV0": {
+          "u": 0,
+          "v": 0.5
+        },
+        "MidUV0Bias": {
+          "u": 0,
+          "v": 0
+        },
+        "MidUV1": {
+          "u": 1,
+          "v": 0.75
+        },
+        "MidUV1Bias": {
+          "u": 0,
+          "v": 0
+        }
+      }
+    ]
+  }
+}

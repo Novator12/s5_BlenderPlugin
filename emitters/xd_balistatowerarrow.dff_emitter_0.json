@@ -1,0 +1,136 @@
+{
+  "ParticlePropsId": 13392,
+  "EmitterPropsId": 14432,
+  "EmitterFlags": 127,
+  "MaxParticlesPerBatch": 20,
+  "EmitterStandard": {
+    "Seed": 1,
+    "MaxParticles": 20,
+    "Force": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "EmitterPosition": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "EmitterSize": {
+      "x": 0.5,
+      "y": 0.5,
+      "z": 0.5
+    },
+    "TimeBetweenEmissions": 0,
+    "TimeBetweenEmissionsRandom": 0,
+    "NumParticlesPerEmission": 1,
+    "NumParticlesPerEmissionRandom": 0,
+    "InitialVelocity": 0,
+    "InitialVelocityRandom": 0,
+    "ParticleLife": 0.6666667,
+    "ParticleLifeRandom": 0,
+    "InitialDirection": {
+      "x": 0,
+      "y": 0,
+      "z": 1
+    },
+    "InitialDirectionRandom": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "ParticleSize": {
+      "x": 1,
+      "y": 1
+    },
+    "ParticleSize_SeriMisstake": -2130706433,
+    "Color": {
+      "red": 128,
+      "green": 255,
+      "blue": 255,
+      "alpha": 255
+    },
+    "TextureCoordinates": [
+      {
+        "x": 0,
+        "y": 0
+      },
+      {
+        "x": 1,
+        "y": 1
+      },
+      {
+        "x": 1.10203E-39,
+        "y": 1.0684087E-34
+      },
+      {
+        "x": 1.0684087E-34,
+        "y": 1.046941E-38
+      }
+    ],
+    "ParticleTexture": null,
+    "ParticleRotation": 0
+  },
+  "Color": {
+    "StartColor": {
+      "red": 255,
+      "green": 255,
+      "blue": 255,
+      "alpha": 51
+    },
+    "StartColorRandom": {
+      "red": 0,
+      "green": 0,
+      "blue": 0,
+      "alpha": 0
+    },
+    "EndColor": {
+      "red": 255,
+      "green": 255,
+      "blue": 255,
+      "alpha": 0
+    },
+    "EndColorRandom": {
+      "red": 0,
+      "green": 0,
+      "blue": 0,
+      "alpha": 0
+    }
+  },
+  "TextureCoordinates": null,
+  "Matrix": null,
+  "ParticleSize": {
+    "StartSize": {
+      "x": 20,
+      "y": 20
+    },
+    "StartSizeRandom": {
+      "x": 0,
+      "y": 0
+    },
+    "EndSize": {
+      "x": 2,
+      "y": 2
+    },
+    "EndSizeRandom": {
+      "x": 0,
+      "y": 0
+    }
+  },
+  "Rotate": null,
+  "Tank": {
+    "UpdateFlags": -1,
+    "EmitterFlags": -1,
+    "SourceBlend": 2,
+    "DestinationBlend": 2,
+    "VertexAlphaBlending": true
+  },
+  "AdvPointList": null,
+  "AdvCircle": null,
+  "AdvSphere": null,
+  "AdvEmittingEmitter": null,
+  "AdvMultiColor": null,
+  "AdvMultiTexCoords": null,
+  "AdvMultiSize": null,
+  "AdvMultiTexCoordsStep": null
+}

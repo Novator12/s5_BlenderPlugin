@@ -1,0 +1,137 @@
+{
+  "ParticlePropsId": 20576,
+  "EmitterPropsId": 21616,
+  "EmitterFlags": 127,
+  "MaxParticlesPerBatch": 2,
+  "EmitterStandard": {
+    "Seed": 1,
+    "MaxParticles": 2,
+    "Force": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "EmitterPosition": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "EmitterSize": {
+      "x": 401.2485,
+      "y": 434.18954,
+      "z": 35.97996
+    },
+    "TimeBetweenEmissions": 0.06666667,
+    "TimeBetweenEmissionsRandom": 0.033333335,
+    "NumParticlesPerEmission": 1,
+    "NumParticlesPerEmissionRandom": 2,
+    "InitialVelocity": 7.1959925,
+    "InitialVelocityRandom": 143.91985,
+    "ParticleLife": 0.33333334,
+    "ParticleLifeRandom": 0.33333334,
+    "InitialDirection": {
+      "x": 0,
+      "y": 0,
+      "z": -7.1959925
+    },
+    "InitialDirectionRandom": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "ParticleSize": {
+      "x": 1,
+      "y": 1
+    },
+    "ParticleSize_SeriMisstake": -1,
+    "Color": {
+      "red": 255,
+      "green": 255,
+      "blue": 255,
+      "alpha": 255
+    },
+    "TextureCoordinates": [
+      {
+        "x": 0,
+        "y": 0
+      },
+      {
+        "x": 1,
+        "y": 1
+      },
+      {
+        "x": 7.35047E-40,
+        "y": 1.0102052E-38
+      },
+      {
+        "x": 1.63E-43,
+        "y": 7.1041706E-32
+      }
+    ],
+    "ParticleTexture": {
+      "texture": "XD_StoneSparkles",
+      "textureAlpha": "",
+      "FilterAddressing": 4358,
+      "UnusedInt1": 0,
+      "extension": {}
+    },
+    "ParticleRotation": 0
+  },
+  "Color": null,
+  "TextureCoordinates": null,
+  "Matrix": null,
+  "ParticleSize": {
+    "StartSize": {
+      "x": 1,
+      "y": 1
+    },
+    "StartSizeRandom": {
+      "x": 0,
+      "y": 0
+    },
+    "EndSize": {
+      "x": 1,
+      "y": 1
+    },
+    "EndSizeRandom": {
+      "x": 0,
+      "y": 0
+    }
+  },
+  "Rotate": {
+    "StartRotate": 0,
+    "StartRotateRandom": 360,
+    "EndRotate": 0,
+    "EndRotateRandom": 180
+  },
+  "Tank": {
+    "UpdateFlags": -1,
+    "EmitterFlags": -1,
+    "SourceBlend": 2,
+    "DestinationBlend": 2,
+    "VertexAlphaBlending": true
+  },
+  "AdvPointList": null,
+  "AdvCircle": null,
+  "AdvSphere": null,
+  "AdvEmittingEmitter": null,
+  "AdvMultiColor": null,
+  "AdvMultiTexCoords": null,
+  "AdvMultiSize": {
+    "List": [
+      {
+        "Time": 0.25,
+        "TimeBias": 0,
+        "MidSize": {
+          "x": 20,
+          "y": 20
+        },
+        "MidSizeBias": {
+          "x": 10,
+          "y": 10
+        }
+      }
+    ]
+  },
+  "AdvMultiTexCoordsStep": null
+}

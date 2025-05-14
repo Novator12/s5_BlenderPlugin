@@ -1,0 +1,164 @@
+{
+  "ParticlePropsId": 26704,
+  "EmitterPropsId": 52336,
+  "EmitterFlags": 127,
+  "MaxParticlesPerBatch": 1,
+  "EmitterStandard": {
+    "Seed": 1,
+    "MaxParticles": 1,
+    "Force": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "EmitterPosition": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "EmitterSize": {
+      "x": 26.69075,
+      "y": 26.69075,
+      "z": 26.69075
+    },
+    "TimeBetweenEmissions": 2,
+    "TimeBetweenEmissionsRandom": 0,
+    "NumParticlesPerEmission": 1,
+    "NumParticlesPerEmissionRandom": 0,
+    "InitialVelocity": 0,
+    "InitialVelocityRandom": 0,
+    "ParticleLife": 1,
+    "ParticleLifeRandom": 0,
+    "InitialDirection": {
+      "x": 0,
+      "y": 0,
+      "z": 1
+    },
+    "InitialDirectionRandom": {
+      "x": 0.1,
+      "y": 0.1,
+      "z": 0
+    },
+    "ParticleSize": {
+      "x": 169.29698,
+      "y": 169.29698
+    },
+    "ParticleSize_SeriMisstake": -2130706433,
+    "Color": {
+      "red": 128,
+      "green": 255,
+      "blue": 255,
+      "alpha": 255
+    },
+    "TextureCoordinates": [
+      {
+        "x": 0,
+        "y": 0
+      },
+      {
+        "x": 1,
+        "y": 1
+      },
+      {
+        "x": 1.01E-43,
+        "y": 8.7432E-32
+      },
+      {
+        "x": 1.11E-43,
+        "y": 1.836717E-39
+      }
+    ],
+    "ParticleTexture": {
+      "texture": "salimTrapIcon",
+      "textureAlpha": "",
+      "FilterAddressing": 4358,
+      "UnusedInt1": 0,
+      "extension": {}
+    },
+    "ParticleRotation": 0
+  },
+  "Color": {
+    "StartColor": {
+      "red": 255,
+      "green": 255,
+      "blue": 255,
+      "alpha": 0
+    },
+    "StartColorRandom": {
+      "red": 0,
+      "green": 0,
+      "blue": 0,
+      "alpha": 0
+    },
+    "EndColor": {
+      "red": 255,
+      "green": 255,
+      "blue": 255,
+      "alpha": 0
+    },
+    "EndColorRandom": {
+      "red": 0,
+      "green": 0,
+      "blue": 0,
+      "alpha": 0
+    }
+  },
+  "TextureCoordinates": null,
+  "Matrix": null,
+  "ParticleSize": null,
+  "Rotate": null,
+  "Tank": {
+    "UpdateFlags": -1,
+    "EmitterFlags": -1,
+    "SourceBlend": 2,
+    "DestinationBlend": 2,
+    "VertexAlphaBlending": true
+  },
+  "AdvPointList": null,
+  "AdvCircle": null,
+  "AdvSphere": {
+    "Radius": 0,
+    "RadiusGap": 0,
+    "UseSphereEmission": false
+  },
+  "AdvEmittingEmitter": null,
+  "AdvMultiColor": {
+    "List": [
+      {
+        "Time": 0.2,
+        "TimeBias": 0,
+        "MidColor": {
+          "red": 255,
+          "green": 255,
+          "blue": 255,
+          "alpha": 255
+        },
+        "MidColorBias": {
+          "red": 0,
+          "green": 0,
+          "blue": 0,
+          "alpha": 0
+        }
+      },
+      {
+        "Time": 0.8,
+        "TimeBias": 0,
+        "MidColor": {
+          "red": 255,
+          "green": 255,
+          "blue": 255,
+          "alpha": 255
+        },
+        "MidColorBias": {
+          "red": 0,
+          "green": 0,
+          "blue": 0,
+          "alpha": 0
+        }
+      }
+    ]
+  },
+  "AdvMultiTexCoords": null,
+  "AdvMultiSize": null,
+  "AdvMultiTexCoordsStep": null
+}

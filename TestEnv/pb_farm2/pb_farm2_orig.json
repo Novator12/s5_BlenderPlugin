@@ -65,206 +65,212 @@
           },
           "hanimPLG": {
             "nodeID": 601,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 36,
             "nodes": [
               {
-                "flags": 0,
+                "flags": "Deformable",
                 "nodeID": 601,
                 "nodeIndex": 0
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 200,
                 "nodeIndex": 1
               },
               {
-                "flags": 2,
+                "flags": "2",
                 "nodeID": 602,
                 "nodeIndex": 2
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 603,
                 "nodeIndex": 3
               },
               {
-                "flags": 1,
+                "flags": "NubBone",
                 "nodeID": 604,
                 "nodeIndex": 4
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 605,
                 "nodeIndex": 5
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 300,
                 "nodeIndex": 6
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 307,
                 "nodeIndex": 7
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 302,
                 "nodeIndex": 8
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 309,
                 "nodeIndex": 9
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 308,
                 "nodeIndex": 10
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 301,
                 "nodeIndex": 11
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 305,
                 "nodeIndex": 12
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 310,
                 "nodeIndex": 13
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 311,
                 "nodeIndex": 14
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 312,
                 "nodeIndex": 15
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 306,
                 "nodeIndex": 16
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 313,
                 "nodeIndex": 17
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 304,
                 "nodeIndex": 18
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 314,
                 "nodeIndex": 19
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 303,
                 "nodeIndex": 20
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 315,
                 "nodeIndex": 21
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 316,
                 "nodeIndex": 22
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 400,
                 "nodeIndex": 23
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 401,
                 "nodeIndex": 24
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 402,
                 "nodeIndex": 25
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 403,
                 "nodeIndex": 26
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 404,
                 "nodeIndex": 27
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 405,
                 "nodeIndex": 28
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 406,
                 "nodeIndex": 29
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 407,
                 "nodeIndex": 30
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 408,
                 "nodeIndex": 31
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 409,
                 "nodeIndex": 32
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 410,
                 "nodeIndex": 33
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 411,
                 "nodeIndex": 34
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 412,
                 "nodeIndex": 35
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 413,
                 "nodeIndex": 36
               },
               {
-                "flags": 3,
+                "flags": "Rigid",
                 "nodeID": 414,
                 "nodeIndex": 37
               },
               {
-                "flags": 0,
+                "flags": "Deformable",
                 "nodeID": 600,
                 "nodeIndex": 38
               },
               {
-                "flags": 1,
+                "flags": "NubBone",
                 "nodeID": 606,
                 "nodeIndex": 39
               }
@@ -307,7 +313,13 @@
           },
           "hanimPLG": {
             "nodeID": 600,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -348,7 +360,13 @@
           },
           "hanimPLG": {
             "nodeID": 414,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -389,7 +407,13 @@
           },
           "hanimPLG": {
             "nodeID": 413,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -430,7 +454,13 @@
           },
           "hanimPLG": {
             "nodeID": 412,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -471,7 +501,13 @@
           },
           "hanimPLG": {
             "nodeID": 411,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -512,7 +548,13 @@
           },
           "hanimPLG": {
             "nodeID": 410,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -553,7 +595,13 @@
           },
           "hanimPLG": {
             "nodeID": 409,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -594,7 +642,13 @@
           },
           "hanimPLG": {
             "nodeID": 408,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -635,7 +689,13 @@
           },
           "hanimPLG": {
             "nodeID": 407,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -676,7 +736,13 @@
           },
           "hanimPLG": {
             "nodeID": 406,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -717,7 +783,13 @@
           },
           "hanimPLG": {
             "nodeID": 405,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -758,7 +830,13 @@
           },
           "hanimPLG": {
             "nodeID": 404,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -799,7 +877,13 @@
           },
           "hanimPLG": {
             "nodeID": 403,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -840,7 +924,13 @@
           },
           "hanimPLG": {
             "nodeID": 402,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -881,7 +971,13 @@
           },
           "hanimPLG": {
             "nodeID": 401,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -922,7 +1018,13 @@
           },
           "hanimPLG": {
             "nodeID": 400,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -963,7 +1065,13 @@
           },
           "hanimPLG": {
             "nodeID": 316,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1004,7 +1112,13 @@
           },
           "hanimPLG": {
             "nodeID": 315,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1045,7 +1159,13 @@
           },
           "hanimPLG": {
             "nodeID": 303,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1086,7 +1206,13 @@
           },
           "hanimPLG": {
             "nodeID": 314,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1127,7 +1253,13 @@
           },
           "hanimPLG": {
             "nodeID": 304,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1168,7 +1300,13 @@
           },
           "hanimPLG": {
             "nodeID": 313,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1209,7 +1347,13 @@
           },
           "hanimPLG": {
             "nodeID": 306,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1250,7 +1394,13 @@
           },
           "hanimPLG": {
             "nodeID": 312,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1291,7 +1441,13 @@
           },
           "hanimPLG": {
             "nodeID": 311,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1332,7 +1488,13 @@
           },
           "hanimPLG": {
             "nodeID": 310,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1373,7 +1535,13 @@
           },
           "hanimPLG": {
             "nodeID": 305,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1414,7 +1582,13 @@
           },
           "hanimPLG": {
             "nodeID": 301,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1455,7 +1629,13 @@
           },
           "hanimPLG": {
             "nodeID": 308,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1496,7 +1676,13 @@
           },
           "hanimPLG": {
             "nodeID": 309,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1537,7 +1723,13 @@
           },
           "hanimPLG": {
             "nodeID": 302,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1578,7 +1770,13 @@
           },
           "hanimPLG": {
             "nodeID": 307,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1619,7 +1817,13 @@
           },
           "hanimPLG": {
             "nodeID": 300,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1661,7 +1865,13 @@
           },
           "hanimPLG": {
             "nodeID": 605,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1697,7 +1907,13 @@
         "extension": {
           "hanimPLG": {
             "nodeID": 602,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1738,7 +1954,13 @@
           },
           "hanimPLG": {
             "nodeID": 200,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1774,7 +1996,13 @@
         "extension": {
           "hanimPLG": {
             "nodeID": 604,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1810,7 +2038,13 @@
         "extension": {
           "hanimPLG": {
             "nodeID": 603,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1846,7 +2080,13 @@
         "extension": {
           "hanimPLG": {
             "nodeID": 606,
-            "flags": 0,
+            "flags": {
+              "SubHierarchy": false,
+              "NoMatrices": false,
+              "UpdateModellingMatrices": false,
+              "UpdateLTMs": false,
+              "LocalSpaceMatrices": false
+            },
             "keyFrameSize": 0,
             "nodes": []
           }
@@ -1857,14 +2097,22 @@
       {
         "frameIndex": 40,
         "geometryIndex": 0,
-        "Flags": 5,
+        "Flags": {
+          "CollisionTest": true,
+          "RenderShadow": false,
+          "Render": true
+        },
         "UnknownInt1": 0,
         "extension": {}
       },
       {
         "frameIndex": 35,
         "geometryIndex": 1,
-        "Flags": 5,
+        "Flags": {
+          "CollisionTest": true,
+          "RenderShadow": false,
+          "Render": true
+        },
         "UnknownInt1": 0,
         "extension": {
           "MaterialFXAtomic_EffectsEnabled": true
@@ -1873,7 +2121,11 @@
       {
         "frameIndex": 39,
         "geometryIndex": 2,
-        "Flags": 5,
+        "Flags": {
+          "CollisionTest": true,
+          "RenderShadow": false,
+          "Render": true
+        },
         "UnknownInt1": 0,
         "extension": {
           "ParticleStandard": {
@@ -1922,9 +2174,9 @@
                   },
                   "ParticleSize": {
                     "x": 1,
-                    "y": 1,
-                    "z": -2.3509886E-38
+                    "y": 1
                   },
+                  "ParticleSize_SeriMisstake": -2130706433,
                   "Color": {
                     "red": 128,
                     "green": 255,
@@ -2319,7 +2571,11 @@
       {
         "frameIndex": 1,
         "geometryIndex": 3,
-        "Flags": 5,
+        "Flags": {
+          "CollisionTest": true,
+          "RenderShadow": false,
+          "Render": true
+        },
         "UnknownInt1": 0,
         "extension": {
           "MaterialFXAtomic_EffectsEnabled": true
@@ -5272,7 +5528,17 @@
             }
           ]
         ],
-        "format": 65591,
+        "format": {
+          "TriStrip": true,
+          "Positions": true,
+          "NumTextureCoordinates": 1,
+          "PreLit": false,
+          "Normals": true,
+          "Light": true,
+          "ModulateMaterialColor": false,
+          "Native": false,
+          "NativeInstance": false
+        },
         "triangles": [
           {
             "v1": 35,
@@ -5958,7 +6224,10 @@
         ],
         "extension": {
           "BinMeshPLG": {
-            "Flags": 1,
+            "Flags": {
+              "UnIndexed": false,
+              "Type": "TriStrip"
+            },
             "Meshes": [
               {
                 "MaterialIndex": 0,
@@ -9570,7 +9839,17 @@
             }
           ]
         ],
-        "format": 65591,
+        "format": {
+          "TriStrip": true,
+          "Positions": true,
+          "NumTextureCoordinates": 1,
+          "PreLit": false,
+          "Normals": true,
+          "Light": true,
+          "ModulateMaterialColor": false,
+          "Native": false,
+          "NativeInstance": false
+        },
         "triangles": [
           {
             "v1": 22,
@@ -10374,7 +10653,7 @@
             "extension": {
               "MaterialFXMat": {
                 "Data1": {
-                  "Type": 4,
+                  "Type": "DualTexture",
                   "Texture1": {
                     "texture": "XB_Decals1_snow",
                     "textureAlpha": "",
@@ -10385,11 +10664,11 @@
                   "Texture2": null,
                   "Coefficient": null,
                   "FrameBufferAlpha": null,
-                  "SrcBlendMode": 5,
-                  "DstBlendMode": 6
+                  "SrcBlendMode": "rwBLENDSRCALPHA",
+                  "DstBlendMode": "rwBLENDINVSRCALPHA"
                 },
                 "Data2": {
-                  "Type": 0,
+                  "Type": "None",
                   "Texture1": null,
                   "Texture2": null,
                   "Coefficient": null,
@@ -10397,14 +10676,17 @@
                   "SrcBlendMode": null,
                   "DstBlendMode": null
                 },
-                "Flags": 4
+                "Flags": "DualTexture"
               }
             }
           }
         ],
         "extension": {
           "BinMeshPLG": {
-            "Flags": 1,
+            "Flags": {
+              "UnIndexed": false,
+              "Type": "TriStrip"
+            },
             "Meshes": [
               {
                 "MaterialIndex": 0,
@@ -10776,12 +11058,25 @@
           }
         ],
         "textureCoordinates": [],
-        "format": 0,
+        "format": {
+          "TriStrip": false,
+          "Positions": false,
+          "NumTextureCoordinates": 0,
+          "PreLit": false,
+          "Normals": false,
+          "Light": false,
+          "ModulateMaterialColor": false,
+          "Native": false,
+          "NativeInstance": false
+        },
         "triangles": [],
         "materials": [],
         "extension": {
           "BinMeshPLG": {
-            "Flags": 0,
+            "Flags": {
+              "UnIndexed": false,
+              "Type": "TriList"
+            },
             "Meshes": []
           }
         }
@@ -51307,7 +51602,17 @@
             }
           ]
         ],
-        "format": 131251,
+        "format": {
+          "TriStrip": true,
+          "Positions": true,
+          "NumTextureCoordinates": 2,
+          "PreLit": false,
+          "Normals": true,
+          "Light": true,
+          "ModulateMaterialColor": false,
+          "Native": false,
+          "NativeInstance": false
+        },
         "triangles": [
           {
             "v1": 1212,
@@ -60301,7 +60606,7 @@
             "extension": {
               "MaterialFXMat": {
                 "Data1": {
-                  "Type": 4,
+                  "Type": "DualTexture",
                   "Texture1": {
                     "texture": "PB_snow1",
                     "textureAlpha": "",
@@ -60312,11 +60617,11 @@
                   "Texture2": null,
                   "Coefficient": null,
                   "FrameBufferAlpha": null,
-                  "SrcBlendMode": 5,
-                  "DstBlendMode": 6
+                  "SrcBlendMode": "rwBLENDSRCALPHA",
+                  "DstBlendMode": "rwBLENDINVSRCALPHA"
                 },
                 "Data2": {
-                  "Type": 0,
+                  "Type": "None",
                   "Texture1": null,
                   "Texture2": null,
                   "Coefficient": null,
@@ -60324,14 +60629,17 @@
                   "SrcBlendMode": null,
                   "DstBlendMode": null
                 },
-                "Flags": 4
+                "Flags": "DualTexture"
               }
             }
           }
         ],
         "extension": {
           "BinMeshPLG": {
-            "Flags": 1,
+            "Flags": {
+              "UnIndexed": false,
+              "Type": "TriStrip"
+            },
             "Meshes": [
               {
                 "MaterialIndex": 0,
