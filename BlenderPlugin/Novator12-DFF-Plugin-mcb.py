@@ -462,26 +462,7 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
     if not empty_geometry:
         geo_tool_item = bpy.context.scene.geometry_tool_items.add()
         geo_tool_item.mesh_name = mesh_o_name
-
-        # Surface Properties
-        geo_SP_spec = js_geometry['materials'][0]['SurfaceProps']['specular']
-        geo_SP_amb = js_geometry['materials'][0]['SurfaceProps']['ambient']
-        geo_SP_diff = js_geometry['materials'][0]['SurfaceProps']['diffuse']
-
-        geo_tool_item.ambient = geo_SP_amb
-        geo_tool_item.specular = geo_SP_spec
-        geo_tool_item.diffuse = geo_SP_diff
-
-        # Snow Texture aus MaterialFXMat
-        geo_tool_item.snow_texture = "No data"
-        material_fx = js_geometry['materials'][0].get('extension', {}).get('MaterialFXMat', {})
-        type_name = material_fx.get('Data1', {}).get('Type')
-
-        if type_name == "DualTexture":
-            snow_tex = material_fx['Data1']['Texture1'].get('texture', "No data")
-            geo_tool_item.snow_texture = snow_tex
-        elif type_name == "UVTransformMat":
-            geo_tool_item.snow_texture = "UVTransformMat"
+        geo_tool_item.materials.clear()
 
         # BinMesh nur 1x pro Geometry
         if js_geometry.get('extension') and 'BinMeshPLG' in js_geometry['extension']:
@@ -494,25 +475,50 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
         else:
             geo_tool_item.bin_mesh_data = "No data"
 
-        # Alle Materials auflisten
-        geo_tool_item.materials.clear()
-        for mat in js_geometry['materials']:
+        # Materials einlesen und auf das GeometryToolItem mappen
+        for mat in js_geometry.get('materials', []):
             mat_entry = geo_tool_item.materials.add()
-            #Material Texture
-            mat_entry.name = mat['textures'][0].get('texture', 'Unknown')
-            #Alpha Texture
-            mat_entry.texture_alpha = mat['textures'][0].get('textureAlpha', '')
-            
-    # Leere Geometry
+
+            # Materialname (Textur)
+            mat_entry.name = mat.get("textures", [{}])[0].get("texture", "Unknown")
+            mat_entry.texture_alpha = mat.get("textures", [{}])[0].get("textureAlpha", "")
+
+            # Surface Props
+            mat_entry.ambient = bool(mat.get("SurfaceProps", {}).get("ambient", 1))
+            mat_entry.specular = bool(mat.get("SurfaceProps", {}).get("specular", 0))
+            mat_entry.diffuse = bool(mat.get("SurfaceProps", {}).get("diffuse", 1))
+
+            # MaterialFX-Erkennung
+            mat_fx = mat.get("extension", {}).get("MaterialFXMat", {})
+            fx_type = mat_fx.get("Data1", {}).get("Type", "")
+
+            if fx_type == "DualTexture":
+                mat_entry.dual_tex = True
+                mat_entry.snow_texture = mat_fx.get("Data1", {}).get("Texture1", {}).get("texture", "No data")
+            elif fx_type == "UVTransformMat":
+                mat_entry.uv_trans = True
+                mat_entry.snow_texture = "UVTransformMat"
+            else:
+                mat_entry.snow_texture = "No data"
+
+    # Leere Geometry (Empty)
     elif empty_geometry:
         geo_tool_item = bpy.context.scene.geometry_tool_items.add()
         geo_tool_item.mesh_name = mesh_o_name
-        geo_tool_item.ambient = False
-        geo_tool_item.specular = False
-        geo_tool_item.diffuse = False
-        geo_tool_item.snow_texture = "Empty-Geometry"
         geo_tool_item.bin_mesh_data = "Empty-Geometry"
         geo_tool_item.materials.clear()
+
+        # Add empty material entry to maintain structure
+        mat_entry = geo_tool_item.materials.add()
+        mat_entry.name = "Empty-Geometry"
+        mat_entry.ambient = False
+        mat_entry.specular = False
+        mat_entry.diffuse = False
+        mat_entry.uv_trans = False
+        mat_entry.dual_tex = False
+        mat_entry.snow_texture = "Empty-Geometry"
+        mat_entry.texture_alpha = ""
+
 
     
 def read_json_rigid(js, use_connect):
@@ -1121,118 +1127,93 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, geometry_
     if any(m.name == "Empty-Geometry" for m in geo_entry.materials):
         data["materials"] = []
     else:
-        snow_tex_type = geo_entry.snow_texture
-        texture_alpha = geo_entry.texture_alpha
         material_entries = geo_entry.materials
-        
+
         for mat in material_entries:
             material = OrderedDict()
             material["color"] = {"alpha": 255, "red": 255, "green": 255, "blue": 255}
             material["UnknownInt1"] = 0
             material["UnknownInt2"] = 237627844
             material["SurfaceProps"] = {
-                "ambient": int(geo_entry.ambient),
-                "specular": int(geo_entry.specular),
-                "diffuse": int(geo_entry.diffuse)
+                "Ambient": int(mat.ambient),
+                "Specular": int(mat.specular),
+                "Diffuse": int(mat.diffuse)
             }
-            
+
             material["extension"] = OrderedDict()
-            
-            if snow_tex_type == "UVTransformMat":
+
+            # FX-Material
+            if mat.uv_trans:
                 material["extension"]["MaterialFXMat"] = {
                     "Data1": {
-                      "Type": "UVTransformMat",
-                      "Texture1": None,
-                      "Texture2": None,
-                      "Coefficient": None,
-                      "FrameBufferAlpha": None,
-                      "SrcBlendMode": None,
-                      "DstBlendMode": None
+                        "Type": "UVTransformMat",
+                        "Texture1": None, "Texture2": None,
+                        "Coefficient": None, "FrameBufferAlpha": None,
+                        "SrcBlendMode": None, "DstBlendMode": None
                     },
                     "Data2": {
-                      "Type": "None",
-                      "Texture1": None,
-                      "Texture2": None,
-                      "Coefficient": None,
-                      "FrameBufferAlpha": None,
-                      "SrcBlendMode": None,
-                      "DstBlendMode": None
+                        "Type": "None",
+                        "Texture1": None, "Texture2": None,
+                        "Coefficient": None, "FrameBufferAlpha": None,
+                        "SrcBlendMode": None, "DstBlendMode": None
                     },
                     "Flags": "UVTransform"
-                  }
+                }
                 material["extension"]["MaterialUVAnim"] = {
-                    "Name": [
-                      "13 - Default"
-                    ]
-                  }
-                
-            elif snow_tex_type.lower() not in ["no data", "empty-geometry"]:
+                    "Name": ["13 - Default"]
+                }
+
+            elif mat.dual_tex:
                 material["extension"]["MaterialFXMat"] = {
                     "Data1": {
-                      "Type": "DualTexture",
-                      "Texture1": {
-                        "texture": snow_tex_type,
-                        "TexPadding": [
-                          0
-                        ],
-                        "textureAlpha": "",
-                        "TextureAlphaPadding": [
-                          0,
-                          116,
-                          28,
-                          196
-                        ],
-                        "FilterAddressing": 4358,
-                        "UnusedInt1": 0,
-                        "extension": {}
-                      },
-                      "Texture2": None,
-                      "Coefficient": None,
-                      "FrameBufferAlpha": None,
-                      "SrcBlendMode": "rwBLENDSRCALPHA",
-                      "DstBlendMode": "rwBLENDINVSRCALPHA"
+                        "Type": "DualTexture",
+                        "Texture1": {
+                            "texture": mat.snow_texture,
+                            "TexPadding": [0],
+                            "textureAlpha": "",
+                            "TextureAlphaPadding": [0, 116, 28, 196],
+                            "FilterAddressing": 4358,
+                            "UnusedInt1": 0,
+                            "extension": {}
+                        },
+                        "Texture2": None,
+                        "Coefficient": None,
+                        "FrameBufferAlpha": None,
+                        "SrcBlendMode": "rwBLENDSRCALPHA",
+                        "DstBlendMode": "rwBLENDINVSRCALPHA"
                     },
                     "Data2": {
-                      "Type": "None",
-                      "Texture1": None,
-                      "Texture2": None,
-                      "Coefficient": None,
-                      "FrameBufferAlpha": None,
-                      "SrcBlendMode": None,
-                      "DstBlendMode": None
+                        "Type": "None",
+                        "Texture1": None, "Texture2": None,
+                        "Coefficient": None, "FrameBufferAlpha": None,
+                        "SrcBlendMode": None, "DstBlendMode": None
                     },
                     "Flags": "DualTexture"
-                  }
-        
-              
-            material['textures'] = []
+                }
+
+            # TEXTURE
             texture = OrderedDict()
-            texture["texture"] = re.sub(r'\.\d+$', '', mat.name)  # Vereinheitlichung der texturen Novator12
-            if mat.name != "No data" and snow_tex_type != "UVTransformMat" and geo_entry.texture_alpha == "":
-                texture["textureAlpha"] = geo_entry.texture_alpha
-                texture["FilterAddressing"] = 4358
-                texture["UnusedInt1"] = 0
-                texture["extension"] = {}
-                texture["TextureAlphaPadding"] = [0,7,46,196]
-                texture["TexPadding"] = [0,0]
-            elif mat.name != "No data" and snow_tex_type == "UVTransformMat" and geo_entry.texture_alpha == "":
-                texture["textureAlpha"] = geo_entry.texture_alpha
-                texture["FilterAddressing"] = 4358
-                texture["UnusedInt1"] = 0
-                texture["extension"] = {}
-                texture["TextureAlphaPadding"] = [0,183,81,184]
-                texture["TexPadding"] = [0,0]
-            if geo_entry.texture_alpha == texture["texture"] + "alpha":
-                texture["textureAlpha"] = geo_entry.texture_alpha
-                texture["FilterAddressing"] = 4358
-                texture["UnusedInt1"] = 0
-                texture["extension"] = {}
-                texture["TextureAlphaPadding"] = [0,0]
-                texture["TexPadding"] = [0,0,0]
-            
-            material['textures'].append(texture)
-            
-            data['materials'].append(material)
+            base_tex_name = re.sub(r'\.\d+$', '', mat.name)
+            texture["texture"] = base_tex_name
+            texture["textureAlpha"] = mat.texture_alpha
+            texture["FilterAddressing"] = 4358
+            texture["UnusedInt1"] = 0
+            texture["extension"] = {}
+
+            # Padding-Logik
+            if mat.texture_alpha == base_tex_name + "alpha":
+                texture["TextureAlphaPadding"] = [0, 0]
+                texture["TexPadding"] = [0, 0, 0]
+            elif mat.uv_trans:
+                texture["TextureAlphaPadding"] = [0, 183, 81, 184]
+                texture["TexPadding"] = [0, 0]
+            else:
+                texture["TextureAlphaPadding"] = [0, 7, 46, 196]
+                texture["TexPadding"] = [0, 0]
+
+            material["textures"] = [texture]
+            data["materials"].append(material)
+
                 
     return data
 
@@ -1490,12 +1471,20 @@ class ModelExporterDFF(Operator, ExportHelper):
         # Material Daten exportieren
         geometry_data = {
             geo.mesh_name: {
-                "ambient": geo.ambient,
-                "specular": geo.specular,
-                "diffuse": geo.diffuse,
-                "snow_texture": geo.snow_texture,
-                "bin_mesh_data": geo.bin_mesh_data,
-                "texture_alpha": geo.texture_alpha
+                "materials": [
+                    {
+                        "name": mat.name,
+                        "ambient": mat.ambient,
+                        "specular": mat.specular,
+                        "diffuse": mat.diffuse,
+                        "uv_trans": mat.uv_trans,
+                        "dual_tex": mat.dual_tex,
+                        "snow_texture": mat.snow_texture,
+                        "texture_alpha": mat.texture_alpha
+                    }
+                    for mat in geo.materials
+                ],
+                "bin_mesh_data": geo.bin_mesh_data
             }
             for geo in context.scene.geometry_tool_items
         }
@@ -1537,12 +1526,20 @@ class ModelExporterJSON(Operator, ExportHelper):
         # Material Daten exportieren
         geometry_data = {
             geo.mesh_name: {
-                "ambient": geo.ambient,
-                "specular": geo.specular,
-                "diffuse": geo.diffuse,
-                "snow_texture": geo.snow_texture,
-                "bin_mesh_data": geo.bin_mesh_data,
-                "texture_alpha": geo.texture_alpha
+                "materials": [
+                    {
+                        "name": mat.name,
+                        "ambient": mat.ambient,
+                        "specular": mat.specular,
+                        "diffuse": mat.diffuse,
+                        "uv_trans": mat.uv_trans,
+                        "dual_tex": mat.dual_tex,
+                        "snow_texture": mat.snow_texture,
+                        "texture_alpha": mat.texture_alpha
+                    }
+                    for mat in geo.materials
+                ],
+                "bin_mesh_data": geo.bin_mesh_data
             }
             for geo in context.scene.geometry_tool_items
         }
@@ -1839,39 +1836,68 @@ class PARTICLE_OT_reset_effects(Operator):
 
 class GeometryMaterialEntry(PropertyGroup):
     name = StringProperty(name="Material Name")
+    uv_trans = BoolProperty(name="UVTrans", default=False)
+    dual_tex = BoolProperty(name="DualTex", default=False)
+    ambient = BoolProperty(name="Ambient", default=True)
+    specular = BoolProperty(name="Specular", default=False)
+    diffuse = BoolProperty(name="Diffuse", default=True)
+    snow_texture = StringProperty(name="Snow Texture", default="No data")
+    texture_alpha = StringProperty(name="Texture Alpha", default="")
+
+
 
 class GeometryToolItem(PropertyGroup):
     mesh_name = StringProperty(name="Mesh Name", default="No data")
     materials = CollectionProperty(type=GeometryMaterialEntry)
-    ambient = BoolProperty(name="Ambient", default=True)
-    specular = BoolProperty(name="Specular", default=False)
-    diffuse = BoolProperty(name="Diffuse", default=True)
     bin_mesh_data = StringProperty(name="BinMesh Data", default="No data")
-    snow_texture = StringProperty(name="Snow Texture", default="No data")
-    texture_alpha = StringProperty(name="Texture Alpha", default="")
 
 
 class GEOMETRY_UL_tool_entries(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         if item is None:
             return
+        
+            
+        box_main = layout.box()
+        
+        # Sichtbarer Header in der Box
+        box_main.label(text=" Geometry {} --------------------------------------------------------------------------------------------------------------------------------------------------".format(index + 1))
 
-        box = layout.box()
-        box.prop(item, "mesh_name", text="Mesh")
+        # Mesh-Name
+        box_main.prop(item, "mesh_name", text="Mesh")
 
-        mat_names = [m.name for m in item.materials]
-        box.label(text="Materials: {}".format(", ".join(mat_names)))
+        # Materialien mit eigener Box & Checkboxen
+        for idx, mat in enumerate(item.materials):
+            mat_box = box_main.box()
+            mat_box.prop(mat, "name", text="Material {}:".format(idx + 1))
 
-        row = box.row(align=True)
-        row.prop(item, "ambient")
-        row.prop(item, "specular")
-        row.prop(item, "diffuse")
+            row = mat_box.row(align=True)
+            row.prop(mat, "uv_trans")
+            row.prop(mat, "dual_tex")
 
-        row = box.row()
+            row = mat_box.row(align=True)
+            row.prop(mat, "ambient")
+            row.prop(mat, "specular")
+            row.prop(mat, "diffuse")
+
+            row = mat_box.row()
+            row.prop(mat, "snow_texture")
+            row.prop(mat, "texture_alpha")
+
+        # Plus / Minus Buttons für Materials
+        row = box_main.row(align=True)
+        add_op = row.operator("geometry_tools.add_material", icon="PLUS", text="")
+        add_op.index = index
+        rem_op = row.operator("geometry_tools.remove_material", icon="X", text="")
+        rem_op.index = index
+
+        # BinMesh Property
+        row = box_main.row()
         row.prop(item, "bin_mesh_data", text="BinMesh")
-        row = box.row()
-        row.prop(item, "snow_texture", text="Texture")
-        row.prop(item, "texture_alpha", text="Alpha-Tex")
+        
+
+
+
 
 
 
@@ -1923,6 +1949,29 @@ class GEOMETRY_OT_reset_entries(Operator):
         context.scene.geometry_tool_items.clear()
         context.scene.geometry_tool_index = 0
         return {'FINISHED'}
+    
+class GEOMETRY_OT_add_material(Operator):
+    bl_idname = "geometry_tools.add_material"
+    bl_label = "Add Material"
+    index = IntProperty()
+
+    def execute(self, context):
+        geo = context.scene.geometry_tool_items[self.index]
+        geo.materials.add()
+        return {'FINISHED'}
+
+
+class GEOMETRY_OT_remove_material(Operator):
+    bl_idname = "geometry_tools.remove_material"
+    bl_label = "Remove Material"
+    index = IntProperty()
+
+    def execute(self, context):
+        geo = context.scene.geometry_tool_items[self.index]
+        if geo.materials:
+            geo.materials.remove(len(geo.materials) - 1)
+        return {'FINISHED'}
+
 
 
 
@@ -2044,6 +2093,8 @@ def register():
             GEOMETRY_OT_add_entry,
             GEOMETRY_OT_remove_entry,
             GEOMETRY_OT_reset_entries,
+            GEOMETRY_OT_add_material,
+            GEOMETRY_OT_remove_material
         )
         for cls in classes:
             print("[DEBUG] Registering class: {}".format(cls.__name__))
@@ -2079,6 +2130,8 @@ def register():
             GEOMETRY_OT_add_entry,
             GEOMETRY_OT_remove_entry,
             GEOMETRY_OT_reset_entries,
+            GEOMETRY_OT_add_material,
+            GEOMETRY_OT_remove_material
         )
         for cls in custom_classes:
             print("[DEBUG] Registering class: {}".format(cls.__name__))
@@ -2141,6 +2194,8 @@ def unregister():
             GEOMETRY_OT_add_entry,
             GEOMETRY_OT_remove_entry,
             GEOMETRY_OT_reset_entries,
+            GEOMETRY_OT_add_material,
+            GEOMETRY_OT_remove_material
         )
         from bpy.utils import unregister_class
         for cls in reversed(classes):
@@ -2200,6 +2255,8 @@ def unregister():
             GEOMETRY_OT_add_entry,
             GEOMETRY_OT_remove_entry,
             GEOMETRY_OT_reset_entries,
+            GEOMETRY_OT_add_material,
+            GEOMETRY_OT_remove_material
         )
         for cls in custom_classes:
             safe_unregister_class(cls)
