@@ -1,6 +1,8 @@
 Siedler 5 DFF-Plugin für Blender 2.79
 
 Ein Plugin für Blender 2.79 zur Bearbeitung und Konvertierung von Siedler 5 (The Settlers: Heritage of Kings)-Gebäudemodellen über ein JSON/DFF-Zwischenformat.
+Operiert mit dem JSON/Dff-Konverter von @mcb5637: https://github.com/mcb5637/S5Converter
+
 ✅ Funktionsumfang
 🔽 Import
 
