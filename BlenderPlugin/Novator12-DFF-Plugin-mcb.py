@@ -12,6 +12,7 @@ import json
 import subprocess
 
 from collections import OrderedDict
+from collections import defaultdict
 
 #Novator Adds:
 #UserDataPlg Menü und Im- & Export + UI Panel Stuff
@@ -309,10 +310,10 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
     bpy.ops.object.mode_set()
     bpy.ops.object.mode_set(mode='OBJECT')
         
-    num_morph_targets = len(js_geometry.get("morphTargets", []))
-    if num_morph_targets != 1:
-        print("Skipping geometry – expected 1 morphTarget, got", num_morph_targets)
-        return
+    #num_morph_targets = len(js_geometry.get("morphTargets", []))
+    #if num_morph_targets != 1:
+        #print("Skipping geometry – expected 1 morphTarget, got", num_morph_targets)
+        #return
     
         
     bm = bmesh.new()
@@ -644,46 +645,6 @@ def read_json_rigid(js, use_connect):
 # -------------------------------------------------------Export Functions------------------------------------------
 # ----------------------------------------------------------------------------------------------------------------- 
 
-def generateMatrixFlags(parents):
-    print("generateMatrixFlags-Func")
-    matrixNeededMoreThanOnce = [None] * len(parents)
-    ops = [None] * len(parents)
-    
-    for i, parent in enumerate(parents):
-        n = 0
-        for j, parent in enumerate(parents):
-            if parents[j] == i:
-                n = n + 1
-        matrixNeededMoreThanOnce[i] = n
-    
-    for i, p in enumerate(parents):
-        op = None
-        
-        parent = parents[i]
-        
-        if parent != -1:
-            matrixNeededMoreThanOnce[parent] = matrixNeededMoreThanOnce[parent] - 1
-            
-            parentneeded = matrixNeededMoreThanOnce[parent]
-            selfneeded = matrixNeededMoreThanOnce[i]
-            
-            if selfneeded == 0 and parentneeded == 0:
-                op = 1
-            elif selfneeded == 0:
-                op = 3
-            elif parentneeded == 0:
-                op = 0
-            else:
-                op = 2
-        else:
-            op = 0
-        
-        ops[i] = op;
-        
-    return ops;
-
-
-
 def editBoneToMatrix(bone):
     translation = bone.head
     tail = bone.tail - translation
@@ -697,11 +658,14 @@ def editBoneToMatrix(bone):
     return mat4x4
 
 def vec3_to_js(vec3):
-    val = OrderedDict()
-    val["x"] = vec3[0]
-    val["y"] = vec3[1]
-    val["z"] = vec3[2]
-    return val
+    def num(x):
+        return int(x) if x == int(x) else round(x, 6)
+    return {
+        "x": num(vec3[0]),
+        "y": num(vec3[1]),
+        "z": num(vec3[2])
+    }
+
 
 
 def bone_name_to_id(boneName):
@@ -739,8 +703,41 @@ def calculateBoneIdsByLength(hierarchy, numKeyframes):
     firstBone = len(hierarchy) - numKeyframes
     return calculateBoneIds(hierarchy, firstBone)
 
+def calculate_hanim_parents(frame_hierarchy, export_order_auto, bone_names_sorted):
+    # Build nodeIDs from bone names
+    node_ids = [bone_name_to_id(bone_name) for bone_name in bone_names_sorted]
+
+    # Map frame index → nodeID
+    frame_index_to_node_id = dict((i, node_ids[i]) for i in range(len(node_ids)))
+
+    # Map nodeID → exportOrderAuto index
+    node_id_to_export_index = dict((nid, idx) for idx, nid in enumerate(export_order_auto))
+
+    hanim_parents = []
+
+    for frame_index, parent_frame_index in enumerate(frame_hierarchy):
+        # Root bone case
+        if parent_frame_index == -1:
+            hanim_parents.append(-1)
+            continue
+
+        # Get parent nodeID
+        parent = frame_hierarchy[frame_index]
+        if parent == -1:
+            hanim_parents.append(-1)
+        else:
+            parent_node_id = node_ids[parent]
+            export_index = node_id_to_export_index.get(parent_node_id, -1)
+            hanim_parents.append(export_index)
+
+
+    return hanim_parents
+
+
+
 def generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bone_type_data, hanimPLGDatas):
     print("generate_frame_list-Func")
+    print("Bone-Hierarchy: {}".format(hierarchy))
     frameList = []
     nodeIds = []
 
@@ -765,11 +762,25 @@ def generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bon
     else:
         exportOrderAuto.append(firstBone)
 
+
     add_to_export_order(nodeIds, exportOrderAuto, 600)
     add_to_export_order(nodeIds, exportOrderAuto, 400)
     add_to_export_order(nodeIds, exportOrderAuto, 300)
     add_to_export_order(nodeIds, exportOrderAuto, 200)
+    
+    
+    # --- PATCH: Sicherstellen, dass alle vorhandenen Bones exportiert werden
+    for nodeID in nodeIds:
+        if nodeID not in exportOrderAuto:
+            exportOrderAuto.append(nodeID)
+            
+    # exportOrderAuto = [nid for nid in exportOrderAuto if nid != -1] --> entfernt die -1 für frame_000 (Dummy Frame)
+    print("Bone-Names-Sorted: {}".format(boneNamesSorted))
+    hanim_parents = calculate_hanim_parents(hierarchy, exportOrderAuto, boneNamesSorted)
 
+    print("ExportOrderAuto: {}".format(exportOrderAuto))
+    print("hanim_hierarchy: {}".format(hanim_parents))
+    
     hierarchyRebasedToOne = []
     for parent in hierarchy:
         hierarchyRebasedToOne.append(parent - 1)
@@ -792,7 +803,7 @@ def generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bon
                     index = i
 
             parents.append(index)
-
+    #parents = hanim_parents
     for frameIndex in range(len(hierarchy)):
         frame = OrderedDict()
         
@@ -854,15 +865,16 @@ def generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bon
                 }
                 extension['hanimPLG']['keyFrameSize'] = 0
                 extension['hanimPLG']['nodeID'] = nodeIds[frameIndex]
-                extension['hanimPLG']['numNodes'] = 0
-        
+                extension['hanimPLG']['nodes'] = []
+                extension['hanimPLG']['parents'] = None
+                extension['hanimPLG']['ReBuildNodesArray'] = False
+                
         if frameIndex == 1:
             if hanimData != None:
                 extension['hanimPLG'] = hanimData
             else:
-                extension['hanimPLG']['numNodes'] = len(parents)
                 print("Bone -{} Parents: {}".format(nodeIds[frameIndex],parents))
-                extension['hanimPLG']['parents'] = parents
+                #extension['hanimPLG']['parents'] = parents
                 extension['hanimPLG']['nodes'] = []
                 extension['hanimPLG']['flags'] = {
                     "SubHierarchy": False,
@@ -872,32 +884,16 @@ def generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bon
                     "LocalSpaceMatrices": False
                 } #28672
                 extension['hanimPLG']['keyFrameSize'] = 36
+                extension['hanimPLG']['ReBuildNodesArray'] = True
 
-                matrixflags = generateMatrixFlags(parents)
 
-                flag_map = {
-                    0: "Deformable",
-                    1: "NubBone",
-                    2: "Unknown",
-                    3: "Rigid"
-                }
+                #for j, nodeID in enumerate(exportOrderAuto):
+                    #node = OrderedDict()
 
-                for j, nodeID in enumerate(exportOrderAuto):
-                    boneIndex = nodeIdToFrameIndex[nodeID]
-                    node = OrderedDict()
+                    #node['nodeID'] = nodeID
+                    #node['nodeIndex'] = j
                     
-                    flag_val = matrixflags[j]
-
-                    if flag_val in flag_map:
-                        node['flags'] = flag_map[flag_val]
-                    else:
-                        print("[WARN] Ungültiger HAnimNodeFlags-Wert: {} für NodeID {}".format(flag_val,nodeID))
-                        continue  # oder setze Default, z. B. 'Deformable'
-
-                    node['nodeID'] = nodeID
-                    node['nodeIndex'] = j
-                    
-                    extension['hanimPLG']['nodes'].append(node)
+                    #extension['hanimPLG']['nodes'].append(node)
 
                 
 
@@ -908,10 +904,15 @@ def generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bon
     return frameList
 
 
+
+
+
+
 def determine_bone_names_sorted(ob):
     boneNames = determine_bone_names(ob)
     # TODO: Why do they need to be sorted? Why are they unordered in the first place??
     boneNames.sort(key=lambda bone: bone)
+    print("Bone-Hierarchy-Sorted: {}".format(boneNames))
     return boneNames
 
 def determine_bone_names(ob):
@@ -927,7 +928,7 @@ def determine_bone_names(ob):
         boneNames.append(bone.name)
 
     bpy.ops.object.mode_set()
-
+    print("Bone-Hierarchy-Unsorted: {}".format(boneNames))
     return boneNames
 
 def get_bone_index_by_bone_name(boneNames, name):
@@ -943,8 +944,8 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, geometry_
 
 
     data = OrderedDict()
-    data['numMorphTargets'] = 1
-    data['numVertices'] = len(verts_local)
+    #data['numMorphTargets'] = 1
+    vertices_data = len(verts_local)
         
     mesh_name = mesh_obj.name
     if geometry_data and mesh_obj.name in geometry_data:
@@ -980,13 +981,10 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, geometry_
 
     js_morphTarget = {}
     if has_vertices and has_normals:
-        js_morphTarget['has_vertices'] = 1
-        js_morphTarget['has_normals'] = 1
+        #js_morphTarget['has_vertices'] = 1
+        #js_morphTarget['has_normals'] = 1
         js_morphTarget['vertices'] = js_vertices
         js_morphTarget['normals'] = js_normals
-    else:
-        js_morphTarget['has_vertices'] = 0
-        js_morphTarget['has_normals'] = 0
     
     # Novator Export Sphere Stuff
     # Iteriere durch die Kinder des Hauptmeshes
@@ -998,14 +996,14 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, geometry_
             js_morphTarget['sphere']['y'] = sphere.location.y
             js_morphTarget['sphere']['z'] = sphere.location.z
             js_morphTarget['sphere']['radius'] = sphere.dimensions.x / 2  # Radius = Durchmesser / 2
-            print("Spheren-Daten {}: x = {}, y = {}, z = {}, radius = {}".format(sphere.name, sphere.location.x, sphere.location.y, sphere.location.z, sphere.dimensions.x / 2))
+            # print("Spheren-Daten {}: x = {}, y = {}, z = {}, radius = {}".format(sphere.name, sphere.location.x, sphere.location.y, sphere.location.z, sphere.dimensions.x / 2))
 
     data['morphTargets'].append(js_morphTarget)
     
     # Novator12 – Texture Coordinates
     data['textureCoordinates'] = []
     for uv_layer in mesh_obj.data.uv_layers:
-        js_textureCoordinates = [None] * data['numVertices']
+        js_textureCoordinates = [None] * vertices_data
         has_uvs = False  # Tracke, ob überhaupt gültige UVs gesetzt wurden
 
         for face in mesh_obj.data.polygons:
@@ -1106,7 +1104,7 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, geometry_
     
         data['triangles'].append(triangle)
         
-    data['numTris'] = len(data['triangles'])
+    #data['numTris'] = len(data['triangles'])
     
     
     # Anlegen der Material und Texture Einträge in der Geometry
@@ -1135,9 +1133,9 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, geometry_
             material["UnknownInt1"] = 0
             material["UnknownInt2"] = 237627844
             material["SurfaceProps"] = {
-                "Ambient": int(mat.ambient),
-                "Specular": int(mat.specular),
-                "Diffuse": int(mat.diffuse)
+                "ambient": int(mat.ambient),
+                "specular": int(mat.specular),
+                "diffuse": int(mat.diffuse)
             }
 
             material["extension"] = OrderedDict()
@@ -1172,7 +1170,11 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, geometry_
                             "TexPadding": [0],
                             "textureAlpha": "",
                             "TextureAlphaPadding": [0, 116, 28, 196],
-                            "FilterAddressing": 4358,
+                            "FilterAddressing": {
+                              "FilterMode": "Linear_MipMap_Linear",
+                              "AddressModeU": "Wrap",
+                              "AddressModeV": "Wrap"
+                            },
                             "UnusedInt1": 0,
                             "extension": {}
                         },
@@ -1196,7 +1198,11 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, geometry_
             base_tex_name = re.sub(r'\.\d+$', '', mat.name)
             texture["texture"] = base_tex_name
             texture["textureAlpha"] = mat.texture_alpha
-            texture["FilterAddressing"] = 4358
+            texture["FilterAddressing"] = {
+                  "FilterMode": "Linear_MipMap_Linear",
+                  "AddressModeU": "Wrap",
+                  "AddressModeV": "Wrap"
+                }
             texture["UnusedInt1"] = 0
             texture["extension"] = {}
 
@@ -1237,165 +1243,143 @@ def append_atomic(frameIndex,geometryIndex, particle_data, bone_type_data):  #At
     atomic["extension"] = {} 
     
     #----------------Atomic Extension Writer------------------------------
-    # Fügt importierte Atomic-Data ein:
-    global AtomicMaterialFX_Data
-    #print("[DEBUG:] Atomic-Data: {}".format(AtomicMaterialFX_Data))
+    global AtomicMaterialFX_Data, ParticleDataList
+    #print("[DEBUG] AtomicMaterialFX_Data: {}".format(AtomicMaterialFX_Data))
+    #print("[DEBUG] ParticleDataList: {}".format(ParticleDataList))
+    # === 1. Importierte MaterialFX-Daten haben höchste Priorität
     if frameIndex in AtomicMaterialFX_Data and "MaterialFXAtomic_EffectsEnabled" in AtomicMaterialFX_Data[frameIndex]:
         atomic["extension"] = {"MaterialFXAtomic_EffectsEnabled": True}
         return atomic
-    
-    # Bone Match prüfen
-    
-    #Fügt selbst gesetzte Atomic-Data ein:
+
+    # === 2. Bone Match – selbst gesetzte Atomic-Daten basierend auf Boden und Gebäude Texture
     if bone_type_data:
         for bone_data in bone_type_data:
             if str(frameIndex) == bone_data['index']:
                 atomic["extension"] = {"MaterialFXAtomic_EffectsEnabled": True}
                 return atomic
     
-    # Particle Match prüfen
-    
-    #Fügt importierte Particle-Data ein:
-    global ParticleDataList
+    # === 3. Importierte Particle-Standard-Daten
     if frameIndex in ParticleDataList:
         particle_std = ParticleDataList[frameIndex]
         atomic["extension"]["ParticleStandard"] = particle_std
         return atomic
     
-    #Fügt selbst gesetzte Particle-Data ein:    
+    # === 4. Manuell gesetzte Partikeleffekte (UI)
     if particle_data:
         for particle in particle_data:
             if str(frameIndex) == particle['name']:
                 effect_type = particle['type']
-                if effect_type in PARTICLE_EFFECT_LUT:
-                    atomic["extension"] = PARTICLE_EFFECT_LUT[effect_type]
-                    print("[DEBUG] Particle Match: frameIndex={}, type={}".format(frameIndex, effect_type))
+                effect_key = str(effect_type).strip()
+
+                if effect_key == "Ubisoft":
+                    # Ubisoft-Effekt wird automatisch aus importierten Daten übernommen – keine Warnung
+                    return atomic
+
+                if effect_key in PARTICLE_EFFECT_LUT:
+                    atomic["extension"] = PARTICLE_EFFECT_LUT[effect_key]
+                    print("[DEBUG] Particle Match: frameIndex={}, type={}".format(frameIndex, effect_key))
                 else:
-                    print("[WARN] Unbekannter Partikeleffekt: '{}' – kein Eintrag im LUT".format(effect_type))
+                    print("[WARN] Unbekannter Partikeleffekt: '{}' – kein Eintrag im LUT".format(effect_key))
                 return atomic
     
     return atomic
     
+def extract_index_from_frame_name(frame_name):
+    try:
+        parts = frame_name.split("_")
+        if len(parts) == 2 and parts[1].isdigit():  # z. B. frame_000
+            return int(parts[1].lstrip("0")) if parts[1].lstrip("0") != "" else 0
+        elif len(parts) >= 3 and parts[1].isdigit():  # z. B. frame_005_703
+            return int(parts[1].lstrip("0")) if parts[1].lstrip("0") != "" else 0
+    except Exception:
+        pass
+    return -1  # Fehlerwert
+
 
 def get_json_rigid(bone_type_data, particle_data, geometry_data):
     print("get_json_rigid-Func")
-    # armature must be selected!
 
     sce = bpy.context.scene
     ob = bpy.context.object
 
-        
-    #os.system("cls")
-
-    #print(ob)
-
-    #hierarchy, restMatrices = determine_hierarchy_and_rest_matrices(ob)
     boneNamesSorted = determine_bone_names_sorted(ob)
-    
-    numBones = len(ob.pose.bones)
-    # Rest Matrices ermitteln
+
     bpy.ops.object.mode_set(mode='EDIT')
+
     hierarchy = []
     restMatrices = []
-
     userDatas = []
     hanimPLGDatas = []
 
-    sortedBoneList = []
-    for bone in ob.data.edit_bones:
-        sortedBoneList.append(bone)
-    sortedBoneList.sort(key=lambda bone: bone.name)
-
+    # Original Bone-Reihenfolge
+    #originalBoneList = list(ob.data.edit_bones)
+    #bone_to_original_index = {bone.name: i for i, bone in enumerate(originalBoneList)}
 
     for frameIndex in range(len(boneNamesSorted)):
-
-
-
-        bone = get_bone_by_name_(ob.data.edit_bones, boneNamesSorted[frameIndex])
-
-        if "userData" in bone:
-            userDatas.append(bone["userData"].to_dict())
-        else:
-            userDatas.append(None)  
-        
-        if "hanimPLG" in bone:
-            hanimPLGDatas.append(bone["hanimPLG"].to_dict())
-        else:
-            hanimPLGDatas.append(None)  
-
-        parentIndex = -1
+        bone_name = boneNamesSorted[frameIndex]
+        bone = get_bone_by_name_(ob.data.edit_bones, bone_name)
         if bone.parent:
-            
-            for index in range(len(sortedBoneList)):
-                if sortedBoneList[index] == bone.parent:
-                    parentIndex = index
-                    #print(frameIndex, index, bone.parent)
-        hierarchy.append(parentIndex)
+            print("Bone_Data: {}".format(bone.parent))
+        if not bone:
+            print("[WARN] Bone {} not found!".format(bone_name))
+            continue
 
-      #  print(frameIndex, parentIndex)
+        userDatas.append(bone.get("userData").to_dict() if "userData" in bone else None)
+        hanimPLGDatas.append(bone.get("hanimPLG").to_dict() if "hanimPLG" in bone else None)
+
+        if bone.parent:
+            parentIndex = extract_index_from_frame_name(bone.parent.name)
+        else:
+            parentIndex = -1
+        
+        hierarchy.append(parentIndex)
 
         mat4x4 = editBoneToMatrix(bone)
         if bone.parent:
-            mat4x4 = editBoneToMatrix(bone.parent).inverted() * mat4x4
+            parentMat = editBoneToMatrix(bone.parent)
+            if parentMat:
+                mat4x4 = parentMat.inverted() * mat4x4
         restMatrices.append(mat4x4)
+    print("Hierarchy_Fixed: {}".format(hierarchy))
+    bpy.ops.object.mode_set(mode='OBJECT')  # Sicherer Abschluss des Edit-Modus
 
-        #print(frameIndex, bone)
-
-    bpy.ops.object.mode_set()
-    # Rest Matrices & Hierarchy ermittelt
-
-
-    meshesToExport = []
-    for obj in bpy.data.objects:
-        if obj.type == 'MESH' and ob in [m.object for m in obj.modifiers if m.type == 'ARMATURE']:
-            meshesToExport.append(obj)
-
-
-   # print(skin_obj_to_parents(ob))
-   # print(hierarchy)
-
+    # --- Geometry & Atomics
+    meshesToExport = [
+        obj for obj in bpy.data.objects
+        if obj.type == 'MESH' and any(m.type == 'ARMATURE' and m.object == ob for m in obj.modifiers)
+    ]
 
     clump = OrderedDict()
-    clump["frames"] = generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas,bone_type_data, hanimPLGDatas)
+    clump["frames"] = generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bone_type_data, hanimPLGDatas)
+    
     clump["atomics"] = []
     clump["geometries"] = []
 
-    #return
+    for geometryIndex, mesh in enumerate(meshesToExport):
+        bone_name = mesh.vertex_groups[0].name
+        frameIndex = get_bone_index_by_bone_name(boneNamesSorted, bone_name)
 
-    
-    geometryIndex = 0
-    for mesh in meshesToExport:
-        frameIndex = get_bone_index_by_bone_name(boneNamesSorted, mesh.vertex_groups[0].name)
+        if frameIndex == -1:
+            print("[WARN] Bone not found for mesh: {}".format(mesh.name))
+            continue
 
-
-        #print("FrameIndex", frameIndex, mesh.vertex_groups[0].name)
-
-       # print(get_bone_by_name(ob, mesh.vertex_groups[0].name))
-       # xyz = (frameRestMatrix * mu.Vector((x,y,z, 1))).to_3d()
-
-
-        # rest matrix für aktuelles geometry ermitteln
         mat = restMatrices[frameIndex]
         index = hierarchy[frameIndex]
-        while hierarchy[index] != -1:
+        seen = set()  # Sicherheitscheck für Endlosschleifen
+        while index != -1 and index not in seen:
+            seen.add(index)
             mat = restMatrices[index] * mat
-            #print("parent", index)
-
             index = hierarchy[index]
-
 
         frameRestMatrix = mat
 
-        clump["geometries"].append(new_mesh_obj_to_json(mesh, frameRestMatrix.inverted(), bone_type_data, geometry_data))
-        # print("Geometrie-Data {}: {}".format(mesh, clump["geometries"])) # --Debug
-        # add geometry to atomics
-        atomic = append_atomic(frameIndex,geometryIndex, particle_data, bone_type_data)
-
-        clump["atomics"].append(atomic)
-        
-        geometryIndex = geometryIndex + 1
+        clump["geometries"].append(
+            new_mesh_obj_to_json(mesh, frameRestMatrix.inverted(), bone_type_data, geometry_data)
+        )
+        clump["atomics"].append(
+            append_atomic(frameIndex, geometryIndex, particle_data, bone_type_data)
+        )
     
-
     js = {}
     js["clump"] = clump
 
@@ -1869,7 +1853,7 @@ class GEOMETRY_UL_tool_entries(UIList):
         # Materialien mit eigener Box & Checkboxen
         for idx, mat in enumerate(item.materials):
             mat_box = box_main.box()
-            mat_box.prop(mat, "name", text="Material {}:".format(idx + 1))
+            mat_box.prop(mat, "name", text="Material {}".format(idx + 1))
 
             row = mat_box.row(align=True)
             row.prop(mat, "uv_trans")
@@ -2401,7 +2385,11 @@ if __name__ == "__main__":
                             "ParticleTexture": {
                                 "texture": "smoke10",
                                 "textureAlpha": "",
-                                "FilterAddressing": 4358,
+                                "FilterAddressing": {
+                                  "FilterMode": "Linear_MipMap_Linear",
+                                  "AddressModeU": "Wrap",
+                                  "AddressModeV": "Wrap"
+                                },
                                 "UnusedInt1": 0,
                                 "extension": {}
                             },
@@ -2641,7 +2629,11 @@ if __name__ == "__main__":
                         "ParticleTexture": {
                             "texture": "fire02",
                             "textureAlpha": "",
-                            "FilterAddressing": 4358,
+                            "FilterAddressing": {
+                              "FilterMode": "Linear_MipMap_Linear",
+                              "AddressModeU": "Wrap",
+                              "AddressModeV": "Wrap"
+                            },
                             "UnusedInt1": 0,
                             "extension": {}
                         },
@@ -3340,7 +3332,11 @@ if __name__ == "__main__":
                         "ParticleTexture": {
                             "texture": "woodchip",
                             "textureAlpha": "",
-                            "FilterAddressing": 4358,
+                            "FilterAddressing": {
+                  "FilterMode": "Linear_MipMap_Linear",
+                  "AddressModeU": "Wrap",
+                  "AddressModeV": "Wrap"
+                },
                             "UnusedInt1": 0,
                             "extension": {}
                         },
@@ -3456,7 +3452,11 @@ if __name__ == "__main__":
                         "ParticleTexture": {
                             "texture": "PB_Weathermachine_lightning",
                             "textureAlpha": "",
-                            "FilterAddressing": 4358,
+                            "FilterAddressing": {
+                  "FilterMode": "Linear_MipMap_Linear",
+                  "AddressModeU": "Wrap",
+                  "AddressModeV": "Wrap"
+                },
                             "UnusedInt1": 0,
                             "extension": {}
                         },
@@ -3675,7 +3675,11 @@ if __name__ == "__main__":
                         "ParticleTexture": {
                             "texture": "sulfur_spray",
                             "textureAlpha": "",
-                            "FilterAddressing": 4358,
+                            "FilterAddressing": {
+                  "FilterMode": "Linear_MipMap_Linear",
+                  "AddressModeU": "Wrap",
+                  "AddressModeV": "Wrap"
+                },
                             "UnusedInt1": 0,
                             "extension": {}
                         },
@@ -3847,7 +3851,11 @@ if __name__ == "__main__":
                         "ParticleTexture": {
                             "texture": "salimTrapIcon",
                             "textureAlpha": "",
-                            "FilterAddressing": 4358,
+                            "FilterAddressing": {
+                  "FilterMode": "Linear_MipMap_Linear",
+                  "AddressModeU": "Wrap",
+                  "AddressModeV": "Wrap"
+                },
                             "UnusedInt1": 0,
                             "extension": {}
                         },
@@ -4018,7 +4026,11 @@ if __name__ == "__main__":
                         "ParticleTexture": {
                             "texture": "TMP_resourceGold_Sparkle",
                             "textureAlpha": "",
-                            "FilterAddressing": 4358,
+                            "FilterAddressing": {
+                  "FilterMode": "Linear_MipMap_Linear",
+                  "AddressModeU": "Wrap",
+                  "AddressModeV": "Wrap"
+                },
                             "UnusedInt1": 0,
                             "extension": {}
                         },
@@ -4207,7 +4219,11 @@ if __name__ == "__main__":
                                 "ParticleTexture": {
                                     "texture": "XD_StoneSparkles",
                                     "textureAlpha": "",
-                                    "FilterAddressing": 4358,
+                                    "FilterAddressing": {
+                  "FilterMode": "Linear_MipMap_Linear",
+                  "AddressModeU": "Wrap",
+                  "AddressModeV": "Wrap"
+                },
                                     "UnusedInt1": 0,
                                     "extension": {}
                                 },
@@ -4396,7 +4412,11 @@ if __name__ == "__main__":
                         "ParticleTexture": {
                             "texture": "smoke11",
                             "textureAlpha": "",
-                            "FilterAddressing": 4358,
+                            "FilterAddressing": {
+                  "FilterMode": "Linear_MipMap_Linear",
+                  "AddressModeU": "Wrap",
+                  "AddressModeV": "Wrap"
+                },
                             "UnusedInt1": 0,
                             "extension": {}
                         },
@@ -4600,7 +4620,11 @@ if __name__ == "__main__":
                         "ParticleTexture": {
                             "texture": "XF_Leaves",
                             "textureAlpha": "",
-                            "FilterAddressing": 4358,
+                            "FilterAddressing": {
+                  "FilterMode": "Linear_MipMap_Linear",
+                  "AddressModeU": "Wrap",
+                  "AddressModeV": "Wrap"
+                },
                             "UnusedInt1": 0,
                             "extension": {}
                         },
@@ -4737,7 +4761,11 @@ if __name__ == "__main__":
                         "ParticleTexture": {
                             "texture": "smoke12",
                             "textureAlpha": "",
-                            "FilterAddressing": 4358,
+                            "FilterAddressing": {
+                  "FilterMode": "Linear_MipMap_Linear",
+                  "AddressModeU": "Wrap",
+                  "AddressModeV": "Wrap"
+                },
                             "UnusedInt1": 0,
                             "extension": {}
                         },
@@ -5121,7 +5149,11 @@ if __name__ == "__main__":
                         "ParticleTexture": {
                             "texture": "fire01",
                             "textureAlpha": "",
-                            "FilterAddressing": 4358,
+                            "FilterAddressing": {
+                  "FilterMode": "Linear_MipMap_Linear",
+                  "AddressModeU": "Wrap",
+                  "AddressModeV": "Wrap"
+                },
                             "UnusedInt1": 0,
                             "extension": {}
                         },
@@ -5734,7 +5766,11 @@ if __name__ == "__main__":
                         "ParticleTexture": {
                             "texture": "firewheel",
                             "textureAlpha": "",
-                            "FilterAddressing": 4358,
+                            "FilterAddressing": {
+                  "FilterMode": "Linear_MipMap_Linear",
+                  "AddressModeU": "Wrap",
+                  "AddressModeV": "Wrap"
+                },
                             "UnusedInt1": 0,
                             "extension": {}
                         },
