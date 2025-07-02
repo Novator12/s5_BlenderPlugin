@@ -72,6 +72,8 @@ Operiert mit dem JSON/DFF-Konverter von [@mcb5637](https://github.com/mcb5637/S5
 
 📝 Lizenz & Hinweise
 
+    Mathematische Berechnung basiert auf Kimichuras Siedler 5 Plugin (shokimpexp_rigid.py [Quelle: Siedler MP Server, Discord]), sowie Elementen seiner Codestruktur
+
 Dieses Plugin befindet sich in Entwicklung. Es wird empfohlen, regelmäßig Backups der Blender-Dateien zu erstellen.
 Für Fragen, Vorschläge oder Bugs: Issue auf GitHub erstellen.
 
