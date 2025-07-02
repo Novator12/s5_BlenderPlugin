@@ -50,6 +50,8 @@ Operiert mit dem JSON/DFF-Konverter von [@mcb5637](https://github.com/mcb5637/S5
 
 📤 Export
 
+    !Beachten!: Meshes müssen folgendes Namensschema haben: Mesh1, Mesh2,...,Mesh11,Mesh12,...
+
     Export in JSON und DFF-Format
 
     Automatische Generierung von HAnimPLG (Nodes & Parents) beim Export
