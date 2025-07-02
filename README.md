@@ -74,3 +74,23 @@ Operiert mit dem JSON/DFF-Konverter von [@mcb5637](https://github.com/mcb5637/S5
 
 Dieses Plugin befindet sich in Entwicklung. Es wird empfohlen, regelmäßig Backups der Blender-Dateien zu erstellen.
 Für Fragen, Vorschläge oder Bugs: Issue auf GitHub erstellen.
+
+
+⚙️ Neue Funktionen:
+
+User-Data für Decal und Building Bones anlegen:
+![grafik](https://github.com/user-attachments/assets/681dc428-140c-4f79-b9ef-b8c26a35450d)
+
+Generierung von Bounding Spheres:
+![grafik](https://github.com/user-attachments/assets/ca1d2f9d-0645-42ce-8d33-fa4f617de3e3)
+
+Erkennung und additives Hinzufügen von Particle Effekten:
+![grafik](https://github.com/user-attachments/assets/d060aa6d-183b-44d9-8594-d2ad702213b5)
+
+Erkennen und anlegen von Materialdaten:
+![grafik](https://github.com/user-attachments/assets/915752d4-ba0f-4853-9f31-a681fe088b48)
+
+Resetten der gesamten Szene:
+![grafik](https://github.com/user-attachments/assets/42643b07-7543-40b8-a68d-86725adcc93f)
+
+
