@@ -1,3 +1,16 @@
+#------------------------------------------Plugin Info -----------------------------------------------------------------------------------
+
+bl_info = {
+    "name": "Novator12 DFF Plugin",
+    "author": "Novator12",
+    "version": (1, 0),
+    "blender": (2, 79, 0),
+    "location": "Info-Header / Scene Tools",
+    "description": "Importiert und exportiert DFF-Dateien für Siedler 5 | Wandelt .dff-Files in JSON-Files um.",
+    "category": "Import-Export",
+}
+    
+
 import bpy
 import os
 import sys
@@ -185,29 +198,15 @@ def make_armature_from_frames(js_frames, use_connect):
         if extension != None and "userDataPLG" in extension:
             userDataPLG = extension["userDataPLG"]
             userData = userDataPLG
-            
-            #for property in userDataPLG:
-                #print(property)
-                #for value in userDataPLG[property]:
-                #    print(value)
-        
         userDatas.append(userData)
-        #print("Frameindex: {} for UserData : {}".format(parent, userData))   
         
         hanimData = None
         # Novator: Wenn hanimPLG vorhanden beim Import wird auch diese verwendet
         if extension != None and "hanimPLG" in extension:
             hanim_save = extension["hanimPLG"]
             hanimData = hanim_save
-            
-            #for property in userDataPLG:
-                #print(property)
-                #for value in userDataPLG[property]:
-                #    print(value)
         
-        hanimPLGDatas.append(hanimData)
-        #print("Frameindex: {} for hanimPLG : {}".format(parent, hanimData))    
-        
+        hanimPLGDatas.append(hanimData)  
         # === BoneManager-Eintrag automatisch erzeugen ===
         if hasattr(bpy.context.scene, "bone_items"):
             if nodeID is not None and userData is not None:
@@ -233,10 +232,8 @@ def make_armature_from_frames(js_frames, use_connect):
                         print("Neuer Bone gefunden: {}".format(new_bone))
                         bpy.context.scene.bone_active_index = len(bpy.context.scene.bone_items) - 1
 
-                        print("[DEBUG] AutoBoneManager: Hinzugefügt -> ID={}, Typ={}, Index={}".format(nodeID, bone_type, index))
+                        # print("[DEBUG] AutoBoneManager: Hinzugefügt -> ID={}, Typ={}, Index={}".format(nodeID, bone_type, index))
 
-                
-        
     arm = bpy.data.armatures.new("Armature_Skin")
     arm_o = bpy.data.objects.new("Armature_Skin", arm)
     link_object_and_set_active(arm_o)
@@ -244,7 +241,7 @@ def make_armature_from_frames(js_frames, use_connect):
     bpy.ops.object.mode_set(mode='EDIT')
     ebs = arm.edit_bones
 
-    lengthOfNumbers = 3#len(str(len(frames)))
+    lengthOfNumbers = 3 #len(str(len(frames)))
 
     boneNames = []
 
@@ -308,13 +305,7 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
     if len(js_geometry["morphTargets"][0])<=1: #Check auf leere Geometry, wie bei bspw. Particle Effects
         empty_geometry = True     
     bpy.ops.object.mode_set()
-    bpy.ops.object.mode_set(mode='OBJECT')
-        
-    #num_morph_targets = len(js_geometry.get("morphTargets", []))
-    #if num_morph_targets != 1:
-        #print("Skipping geometry – expected 1 morphTarget, got", num_morph_targets)
-        #return
-    
+    bpy.ops.object.mode_set(mode='OBJECT')      
         
     bm = bmesh.new()
     wd = bm.verts.layers.deform.verify()
@@ -337,7 +328,6 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
             for textureCoords in js_geometry["textureCoordinates"][1]: # assume one set of two...
                 uv_coordinates_snow.append((textureCoords["u"], textureCoords["v"]))
             
-    
     vertex_index = 0;
 
     if not empty_geometry:
@@ -364,8 +354,6 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
             vertex[wd][0] = 1
                     
             vertex_index = vertex_index + 1
-
-        
         
     bm.verts.ensure_lookup_table()
 
@@ -391,20 +379,17 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
                 
             except ValueError as valueError:
                 print("caught Error: " + valueError.__str__())
-            
-  
-
 
     bm.to_mesh(mesh)
     bm.free()
     global mesh_count
-    mesh_o_name = "Mesh" + str(mesh_count)
+    mesh_o_name = "Mesh" + str(mesh_count).zfill(2)
     mesh_o = bpy.data.objects.new(mesh_o_name, mesh)
     mesh_count += 1
     
     vgs = mesh_o.vertex_groups
 
-    vgs.new(name=boneName)#"frame_"+str(frameIndex).zfill(stringLengthOfFrames))
+    vgs.new(name=boneName) # "frame_"+str(frameIndex).zfill(stringLengthOfFrames))
         
     arm_mod = mesh_o.modifiers.new(type='ARMATURE', name="skeleton")
     arm_mod.object = arm_o
@@ -425,8 +410,6 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
         tex_name = "Empty-Geometry"
         mesh_o.data.name = tex_name
         
-
-    
     #Novator Additional stuff: Sphere
     if "sphere" in js_geometry["morphTargets"][0]:
         sphere = js_geometry["morphTargets"][0]["sphere"]
@@ -447,10 +430,6 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
         bpy.ops.mesh.primitive_uv_sphere_add(size=sphere_radius, location=sphere_center)
         sphere_obj = bpy.context.object
         sphere_obj.name = sphere_name
-
-        # Custom Property hinzufügen, um die Sphere mit dem Mesh zu verknüpfen
-        #mesh_o["sphere_name"] = sphere_obj.name  # Speichert den Namen der Sphere im Mesh
-        #sphere_obj["linked_mesh"] = mesh_o.name  # Speichert den Namen des Meshes in der Sphere
 
         # Sphere dem Mesh zuordnen (Parenting)
         sphere_obj.parent = mesh_o
@@ -520,8 +499,6 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
         mat_entry.snow_texture = "Empty-Geometry"
         mat_entry.texture_alpha = ""
 
-
-    
 def read_json_rigid(js, use_connect):
     print("read_json_rigid-Func")
     js_clump = js["clump"]
@@ -570,7 +547,6 @@ def read_json_rigid(js, use_connect):
             "firewheel"
         }
         
-
         for atomic in js_clump["atomics"]:
             frame_index = atomic.get("frameIndex")
             if frame_index in used_frame_indices:
@@ -604,8 +580,7 @@ def read_json_rigid(js, use_connect):
                             bpy.context.scene.particle_effects_index = len(bpy.context.scene.particle_effects) - 1
                             used_frame_indices.add(frame_index)
 
-                            print("[DEBUG] Particle Effect erkannt: BoneIndex={}, Type={}".format(
-                                new_effect.bone_index, effect_type))
+                            # print("[DEBUG] Particle Effect erkannt: BoneIndex={}, Type={}".format(new_effect.bone_index, effect_type))
                             break
                     else:
                         continue
@@ -632,14 +607,7 @@ def read_json_rigid(js, use_connect):
         if obj.type == "MESH" and "Sphere" in obj.name:
             obj.hide = True
             obj.hide_render = True
-            print("[DEBUG] Sphere {} wurde ausgeblendet.".format(obj.name))
-
-
-
-
-
-
-
+            # print("[DEBUG] Sphere {} wurde ausgeblendet.".format(obj.name))
 
 
 # -------------------------------------------------------Export Functions------------------------------------------
@@ -665,8 +633,6 @@ def vec3_to_js(vec3):
         "y": num(vec3[1]),
         "z": num(vec3[2])
     }
-
-
 
 def bone_name_to_id(boneName):
     nodeID = boneName[10:]
@@ -703,41 +669,8 @@ def calculateBoneIdsByLength(hierarchy, numKeyframes):
     firstBone = len(hierarchy) - numKeyframes
     return calculateBoneIds(hierarchy, firstBone)
 
-def calculate_hanim_parents(frame_hierarchy, export_order_auto, bone_names_sorted):
-    # Build nodeIDs from bone names
-    node_ids = [bone_name_to_id(bone_name) for bone_name in bone_names_sorted]
-
-    # Map frame index → nodeID
-    frame_index_to_node_id = dict((i, node_ids[i]) for i in range(len(node_ids)))
-
-    # Map nodeID → exportOrderAuto index
-    node_id_to_export_index = dict((nid, idx) for idx, nid in enumerate(export_order_auto))
-
-    hanim_parents = []
-
-    for frame_index, parent_frame_index in enumerate(frame_hierarchy):
-        # Root bone case
-        if parent_frame_index == -1:
-            hanim_parents.append(-1)
-            continue
-
-        # Get parent nodeID
-        parent = frame_hierarchy[frame_index]
-        if parent == -1:
-            hanim_parents.append(-1)
-        else:
-            parent_node_id = node_ids[parent]
-            export_index = node_id_to_export_index.get(parent_node_id, -1)
-            hanim_parents.append(export_index)
-
-
-    return hanim_parents
-
-
-
 def generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bone_type_data, hanimPLGDatas):
     print("generate_frame_list-Func")
-    print("Bone-Hierarchy: {}".format(hierarchy))
     frameList = []
     nodeIds = []
 
@@ -776,34 +709,17 @@ def generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bon
             
     # exportOrderAuto = [nid for nid in exportOrderAuto if nid != -1] --> entfernt die -1 für frame_000 (Dummy Frame)
     print("Bone-Names-Sorted: {}".format(boneNamesSorted))
-    hanim_parents = calculate_hanim_parents(hierarchy, exportOrderAuto, boneNamesSorted)
 
     print("ExportOrderAuto: {}".format(exportOrderAuto))
-    print("hanim_hierarchy: {}".format(hanim_parents))
     
     hierarchyRebasedToOne = []
     for parent in hierarchy:
         hierarchyRebasedToOne.append(parent - 1)
 
-    parents = []
     for j, nodeID in enumerate(exportOrderAuto):
         frameIndex = nodeIdToFrameIndex[nodeID]
         #print(nodeID, nodeIdToFrameIndex[nodeID], hierarchy[frameIndex], hierarchyRebasedToOne[frameIndex])
-
-        parent = hierarchy[frameIndex]
-        if parent == -1:
-            #print(nodeID, nodeIdToFrameIndex[nodeID], "no parent -> -1")
-            parents.append(-1)
-        else:
-            parentNodeID = frameIndexToNodeId[parent]
-
-            index = -1
-            for i, nodeID2 in enumerate(exportOrderAuto):
-                if parentNodeID == nodeID2:
-                    index = i
-
-            parents.append(index)
-    #parents = hanim_parents
+    
     for frameIndex in range(len(hierarchy)):
         frame = OrderedDict()
         
@@ -838,8 +754,6 @@ def generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bon
                 if bone['name'] == str(nodeIds[frameIndex]):
                     found_bone = True  # Ein passender Bone wurde gefunden
                     bone_type = bone['type']
-                    bone_id = bone['name']
-                    bone_index = bone['index']
                     if bone_type == 'DECAL':
                         extension['userDataPLG'] = {'3dsmax User Properties': ['decal=flat', 'Effect=BuildingDecalWithSnow']}
                     elif bone_type == 'BUILDING':
@@ -873,8 +787,6 @@ def generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bon
             if hanimData != None:
                 extension['hanimPLG'] = hanimData
             else:
-                print("Bone -{} Parents: {}".format(nodeIds[frameIndex],parents))
-                #extension['hanimPLG']['parents'] = parents
                 extension['hanimPLG']['nodes'] = []
                 extension['hanimPLG']['flags'] = {
                     "SubHierarchy": False,
@@ -887,32 +799,16 @@ def generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bon
                 extension['hanimPLG']['ReBuildNodesArray'] = True
 
 
-                #for j, nodeID in enumerate(exportOrderAuto):
-                    #node = OrderedDict()
-
-                    #node['nodeID'] = nodeID
-                    #node['nodeIndex'] = j
-                    
-                    #extension['hanimPLG']['nodes'].append(node)
-
-                
-
         frame["extension"] = extension
 
         frameList.append(frame)
 
     return frameList
 
-
-
-
-
-
 def determine_bone_names_sorted(ob):
     boneNames = determine_bone_names(ob)
     # TODO: Why do they need to be sorted? Why are they unordered in the first place??
     boneNames.sort(key=lambda bone: bone)
-    print("Bone-Hierarchy-Sorted: {}".format(boneNames))
     return boneNames
 
 def determine_bone_names(ob):
@@ -922,13 +818,11 @@ def determine_bone_names(ob):
 
     boneNames = []
 
-
     for frameIndex in range(numBones):
         bone = ob.data.edit_bones[frameIndex]
         boneNames.append(bone.name)
 
     bpy.ops.object.mode_set()
-    print("Bone-Hierarchy-Unsorted: {}".format(boneNames))
     return boneNames
 
 def get_bone_index_by_bone_name(boneNames, name):
@@ -940,11 +834,7 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, geometry_
     print("new_mesh_obj_to_json-Func")
     verts_local = [v.co for v in mesh_obj.data.vertices.values()]
 
-    dimensions = mesh_obj.dimensions
-
-
     data = OrderedDict()
-    #data['numMorphTargets'] = 1
     vertices_data = len(verts_local)
         
     mesh_name = mesh_obj.name
@@ -952,8 +842,7 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, geometry_
         mat_data = geometry_data[mesh_obj.name]
     else:
         mat_data = None    
-    # print("Aktuelles Material Data: {}".format(mat_data))
-    
+
     js_vertices = []
     js_normals = []
     
@@ -981,8 +870,6 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, geometry_
 
     js_morphTarget = {}
     if has_vertices and has_normals:
-        #js_morphTarget['has_vertices'] = 1
-        #js_morphTarget['has_normals'] = 1
         js_morphTarget['vertices'] = js_vertices
         js_morphTarget['normals'] = js_normals
     
@@ -996,7 +883,6 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, geometry_
             js_morphTarget['sphere']['y'] = sphere.location.y
             js_morphTarget['sphere']['z'] = sphere.location.z
             js_morphTarget['sphere']['radius'] = sphere.dimensions.x / 2  # Radius = Durchmesser / 2
-            # print("Spheren-Daten {}: x = {}, y = {}, z = {}, radius = {}".format(sphere.name, sphere.location.x, sphere.location.y, sphere.location.z, sphere.dimensions.x / 2))
 
     data['morphTargets'].append(js_morphTarget)
     
@@ -1103,9 +989,6 @@ def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, geometry_
         triangle['materialId'] = 0
     
         data['triangles'].append(triangle)
-        
-    #data['numTris'] = len(data['triangles'])
-    
     
     # Anlegen der Material und Texture Einträge in der Geometry
     
@@ -1244,8 +1127,7 @@ def append_atomic(frameIndex,geometryIndex, particle_data, bone_type_data):  #At
     
     #----------------Atomic Extension Writer------------------------------
     global AtomicMaterialFX_Data, ParticleDataList
-    #print("[DEBUG] AtomicMaterialFX_Data: {}".format(AtomicMaterialFX_Data))
-    #print("[DEBUG] ParticleDataList: {}".format(ParticleDataList))
+
     # === 1. Importierte MaterialFX-Daten haben höchste Priorität
     if frameIndex in AtomicMaterialFX_Data and "MaterialFXAtomic_EffectsEnabled" in AtomicMaterialFX_Data[frameIndex]:
         atomic["extension"] = {"MaterialFXAtomic_EffectsEnabled": True}
@@ -1277,7 +1159,7 @@ def append_atomic(frameIndex,geometryIndex, particle_data, bone_type_data):  #At
 
                 if effect_key in PARTICLE_EFFECT_LUT:
                     atomic["extension"] = PARTICLE_EFFECT_LUT[effect_key]
-                    print("[DEBUG] Particle Match: frameIndex={}, type={}".format(frameIndex, effect_key))
+                    # print("[DEBUG] Particle Match: frameIndex={}, type={}".format(frameIndex, effect_key))
                 else:
                     print("[WARN] Unbekannter Partikeleffekt: '{}' – kein Eintrag im LUT".format(effect_key))
                 return atomic
@@ -1312,9 +1194,6 @@ def get_json_rigid(bone_type_data, particle_data, geometry_data):
     hanimPLGDatas = []
 
     # Original Bone-Reihenfolge
-    #originalBoneList = list(ob.data.edit_bones)
-    #bone_to_original_index = {bone.name: i for i, bone in enumerate(originalBoneList)}
-
     for frameIndex in range(len(boneNamesSorted)):
         bone_name = boneNamesSorted[frameIndex]
         bone = get_bone_by_name_(ob.data.edit_bones, bone_name)
@@ -1344,10 +1223,12 @@ def get_json_rigid(bone_type_data, particle_data, geometry_data):
     bpy.ops.object.mode_set(mode='OBJECT')  # Sicherer Abschluss des Edit-Modus
 
     # --- Geometry & Atomics
-    meshesToExport = [
+    meshesToExport = sorted(
+    [
         obj for obj in bpy.data.objects
         if obj.type == 'MESH' and any(m.type == 'ARMATURE' and m.object == ob for m in obj.modifiers)
-    ]
+    ],
+    key=lambda obj: int(re.search(r'\d+$', obj.name).group()) if re.search(r'\d+$', obj.name) else -1)
 
     clump = OrderedDict()
     clump["frames"] = generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bone_type_data, hanimPLGDatas)
@@ -1385,15 +1266,7 @@ def get_json_rigid(bone_type_data, particle_data, geometry_data):
 
     return js
 
-#------------------------------------------Plugin Info -----------------------------------------------------------------------------------
 
-bl_info = {
-    "name": "Novators changed DFF-JSON & ANM-JSON Rigid Model/Animation Imp-/Exporter",
-    "location": "File > Import-Export",
-    "blender": (2, 80, 0), # meh...
-    "category": "Import-Export",
-}
-    
 #-------------------------------------------------------------------------------------------------------------------------------------------
 #----------------------------------------------------------------Import Classes-------------------------------------------------------------
 
@@ -1880,13 +1753,6 @@ class GEOMETRY_UL_tool_entries(UIList):
         row.prop(item, "bin_mesh_data", text="BinMesh")
         
 
-
-
-
-
-
-
-
 class GEOMETRY_PT_tools(Panel):
     bl_idname = "VIEW3D_PT_geometry_tools"
     bl_label = "Geometry Tools"
@@ -1956,8 +1822,65 @@ class GEOMETRY_OT_remove_material(Operator):
             geo.materials.remove(len(geo.materials) - 1)
         return {'FINISHED'}
 
+# ---------------------------------------------- Delete Scene Button --------------------------------------------
+# ---------------------------------------------------------------------------------------------------------------
 
 
+class SCENE_OT_clear_all(bpy.types.Operator):
+    bl_idname = "scene.clear_all_objects"
+    bl_label = "Clear Scene"
+    bl_description = "Löscht alle Objekte und World aus der aktuellen Szene"
+
+    def execute(self, context):
+        # Leeren der Tool-Einträge:
+        bpy.ops.export_model.reset_bone_items()
+        bpy.ops.export_model.reset_particle_effects()
+        bpy.ops.geometry_tools.reset_entries()
+
+        # Wechsel in Object Mode, falls nicht bereits
+        if bpy.ops.object.mode_set.poll():
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+        # Alles sichtbar machen, sonst können versteckte Objekte nicht gelöscht werden
+        for obj in bpy.data.objects:
+            obj.hide = False
+            obj.hide_render = False
+            obj.hide_select = False
+
+        # Alle Objekte löschen
+        bpy.ops.object.select_all(action='SELECT')
+        bpy.ops.object.delete(use_global=False)
+
+        # Entferne restliche Datentypen (Meshdaten, Materialien etc.)
+        for block in (
+                bpy.data.meshes,
+                bpy.data.lamps,
+                bpy.data.cameras,
+                bpy.data.curves,
+                bpy.data.materials,
+                bpy.data.textures,
+                bpy.data.images,
+                bpy.data.armatures,
+        ):
+            for datablock in block:
+                if datablock.users == 0:
+                    block.remove(datablock)
+
+        # World löschen, falls zugewiesen
+        if context.scene.world:
+            w = context.scene.world
+            context.scene.world = None
+            if w.users == 0:
+                bpy.data.worlds.remove(w)
+
+        return {'FINISHED'}
+
+class SCENE_PT_clear_panel(bpy.types.Header):
+    bl_space_type = 'VIEW_3D'
+
+    def draw(self, context):
+        layout = self.layout
+        layout.operator("scene.clear_all_objects", text="Clear Scene", icon='LOOP_BACK')
 
 # ---------------------------------------------- Register/ Unregister Classes -----------------------------------
 # ---------------------------------------------------------------------------------------------------------------
@@ -2078,7 +2001,9 @@ def register():
             GEOMETRY_OT_remove_entry,
             GEOMETRY_OT_reset_entries,
             GEOMETRY_OT_add_material,
-            GEOMETRY_OT_remove_material
+            GEOMETRY_OT_remove_material,
+            SCENE_OT_clear_all,
+            SCENE_PT_clear_panel
         )
         for cls in classes:
             print("[DEBUG] Registering class: {}".format(cls.__name__))
@@ -2115,7 +2040,9 @@ def register():
             GEOMETRY_OT_remove_entry,
             GEOMETRY_OT_reset_entries,
             GEOMETRY_OT_add_material,
-            GEOMETRY_OT_remove_material
+            GEOMETRY_OT_remove_material,
+            SCENE_OT_clear_all,
+            SCENE_PT_clear_panel
         )
         for cls in custom_classes:
             print("[DEBUG] Registering class: {}".format(cls.__name__))
@@ -2179,7 +2106,9 @@ def unregister():
             GEOMETRY_OT_remove_entry,
             GEOMETRY_OT_reset_entries,
             GEOMETRY_OT_add_material,
-            GEOMETRY_OT_remove_material
+            GEOMETRY_OT_remove_material,
+            SCENE_OT_clear_all,
+            SCENE_PT_clear_panel
         )
         from bpy.utils import unregister_class
         for cls in reversed(classes):
@@ -2240,7 +2169,9 @@ def unregister():
             GEOMETRY_OT_remove_entry,
             GEOMETRY_OT_reset_entries,
             GEOMETRY_OT_add_material,
-            GEOMETRY_OT_remove_material
+            GEOMETRY_OT_remove_material,
+            SCENE_OT_clear_all,
+            SCENE_PT_clear_panel
         )
         for cls in custom_classes:
             safe_unregister_class(cls)
