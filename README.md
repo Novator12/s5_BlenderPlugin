@@ -79,7 +79,7 @@ Operiert mit dem JSON/DFF-Konverter von [@mcb5637](https://github.com/mcb5637/S5
 
 📝 Lizenz & Hinweise
 
-    Mathematische Berechnung des Modelimports (.dff) basiert auf Kimichuras Siedler 5 Plugin (shokimpexp_rigid.py [Quelle: Siedler MP Server, Discord]), sowie Elementen seiner Codestruktur
+    Die Idee des Import- und Exportverfahrens über .dff/.anm->.json->Blender->.json->.dff/.anm (.dff) basiert auf Kimichuras Siedler 5 Plugin (shokimpexp_rigid.py [Quelle: Siedler MP Server, Discord])
     Dieses Projekt wird derzeit aus Gründen der Transparenz, zum Testen und zur Zusammenarbeit mit der Community veröffentlicht.
 
     Teile des Projekts wurden unter Bezug auf ältere Community-Tools und Codestrukturen entwickelt, die innerhalb der Modding-Community geteilt wurden.  
