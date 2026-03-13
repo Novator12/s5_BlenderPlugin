@@ -85,7 +85,9 @@ Operiert mit dem JSON/DFF-Konverter von [@mcb5637](https://github.com/mcb5637/S5
     Teile des Projekts wurden unter Bezug auf ältere Community-Tools und Codestrukturen entwickelt, die innerhalb der Modding-Community geteilt wurden.  
     
     Eigenständige Beiträge, die direkt für dieses Repository erstellt wurden, verbleiben bei den jeweiligen Autoren und können unter Absprache gerne genutzt/verbessert werden.
-    
+
+Link zum Discord von Kimichura: [Siedler MP Server](https://discord.gg/b28BsKz)
+
 Dieses Plugin befindet sich in Entwicklung. Es wird empfohlen, regelmäßig Backups der Blender-Dateien zu erstellen.
 Für Fragen, Vorschläge oder Bugs: Issue auf GitHub erstellen.
 
