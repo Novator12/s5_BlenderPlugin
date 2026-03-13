@@ -2114,7 +2114,7 @@ def set_clipping_for_all_screens(clip_start, clip_end):
 
 def get_converter_exe_location():
     addon_dir = os.path.dirname(__file__)
-    exe_loc = os.path.join(addon_dir, "RW_inline.exe")
+    exe_loc = os.path.join(addon_dir, "S5Converter.exe")
     return exe_loc
 
 
@@ -2122,7 +2122,7 @@ def convert_to_js_external(binary_data):
     print("convert_to_js_external-Func")
     exe = get_converter_exe_location()
     if not os.path.isfile(exe):
-        raise FileNotFoundError(f"RW_inline.exe nicht gefunden: {exe}")
+        raise FileNotFoundError(f"S5Converter.exe nicht gefunden: {exe}")
     p = subprocess.Popen([exe, "--import"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     outs, errs = p.communicate(input=binary_data)
 
@@ -2160,7 +2160,7 @@ def write_model(path, bone_type_data, particle_data, geometry_data):
     else:
         exe = get_converter_exe_location()
         if not os.path.isfile(exe):
-            raise FileNotFoundError(f"RW_inline.exe nicht gefunden: {exe}")
+            raise FileNotFoundError(f"S5Converter.exe nicht gefunden: {exe}")
         p = subprocess.Popen([exe, "--export"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         js_str = json.dumps(js)

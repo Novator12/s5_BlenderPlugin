@@ -22,7 +22,7 @@ DEFAULT_START_PREV_KEYFRAME = -123456789
 
 def get_converter_exe_location():
     addon_dir = os.path.dirname(__file__)
-    exe_loc = os.path.join(addon_dir, "RW_inline.exe")
+    exe_loc = os.path.join(addon_dir, "S5Converter.exe")
     return exe_loc
 
 
@@ -892,18 +892,6 @@ def build_animation_export_json(
 
 
 def convert_json_to_anm_external(js: dict, anm_path: str):
-    debug_dir = r"C:/Users/olive/Downloads"
-    debug_name = os.path.splitext(os.path.basename(anm_path))[0] + "_debug_export.json"
-    debug_path = os.path.join(debug_dir, debug_name)
-
-    try:
-        os.makedirs(debug_dir, exist_ok=True)
-        with open(debug_path, "w", encoding="utf-8") as outfile:
-            json.dump(js, outfile, indent=4)
-        print(f"[INFO] Debug-JSON geschrieben: {debug_path}")
-    except Exception as e:
-        print(f"[WARN] Konnte Debug-JSON nicht schreiben: {e}")
-
     if anm_path.endswith(".json"):
         with open(anm_path, "w", encoding="utf-8") as outfile:
             json.dump(js, outfile, indent=4)
@@ -911,7 +899,7 @@ def convert_json_to_anm_external(js: dict, anm_path: str):
 
     exe = get_converter_exe_location()
     if not os.path.isfile(exe):
-        raise FileNotFoundError(f"RW_inline.exe nicht gefunden: {exe}")
+        raise FileNotFoundError(f"S5Converter.exe nicht gefunden: {exe}")
 
     p = subprocess.Popen([exe, "--export"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     js_str = json.dumps(js)
@@ -920,7 +908,7 @@ def convert_json_to_anm_external(js: dict, anm_path: str):
 
     stderr_text = safe_decode_console(errs)
     if stderr_text:
-        print("[RW_inline stderr]")
+        print("[S5Converter stderr]")
         print(stderr_text)
 
     try:
@@ -1039,7 +1027,7 @@ def apply_animation_data_to_armature(js: dict, arm_ob: bpy.types.Object, source_
 def convert_anm_to_json_external(anm_path: str) -> dict:
     exe = get_converter_exe_location()
     if not os.path.isfile(exe):
-        raise FileNotFoundError(f"RW_inline.exe nicht gefunden: {exe}")
+        raise FileNotFoundError(f"S5Converter.exe nicht gefunden: {exe}")
 
     with open(anm_path, "rb") as f:
         binary_data = f.read()
@@ -1056,16 +1044,16 @@ def convert_anm_to_json_external(anm_path: str) -> dict:
     stderr_text = safe_decode_console(errs)
 
     if stderr_text:
-        print("[RW_inline stderr]")
+        print("[S5Converter stderr]")
         print(stderr_text)
 
     if p.returncode != 0:
-        raise RuntimeError(f"RW_inline Fehler:\n{stderr_text}")
+        raise RuntimeError(f"S5Converter Fehler:\n{stderr_text}")
 
     try:
         return json.loads(stdout_text)
     except Exception as e:
-        raise RuntimeError(f"RW_inline lieferte kein gültiges JSON zurück: {e}")
+        raise RuntimeError(f"S5Converter lieferte kein gültiges JSON zurück: {e}")
 
 
 def convert_json_to_anm_external(js: dict, anm_path: str):
@@ -1076,7 +1064,7 @@ def convert_json_to_anm_external(js: dict, anm_path: str):
 
     exe = get_converter_exe_location()
     if not os.path.isfile(exe):
-        raise FileNotFoundError(f"RW_inline.exe nicht gefunden: {exe}")
+        raise FileNotFoundError(f"S5Converter.exe nicht gefunden: {exe}")
 
     p = subprocess.Popen([exe, "--export"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     js_str = json.dumps(js)
@@ -1085,7 +1073,7 @@ def convert_json_to_anm_external(js: dict, anm_path: str):
 
     stderr_text = safe_decode_console(errs)
     if stderr_text:
-        print("[RW_inline stderr]")
+        print("[S5Converter stderr]")
         print(stderr_text)
 
     try:

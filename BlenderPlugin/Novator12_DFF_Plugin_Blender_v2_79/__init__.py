@@ -441,7 +441,7 @@ def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatri
         sphere_obj.hide_render = True  # Unsichtbar im Render
         sphere_obj.draw_type = 'WIRE'  # Drahtmodell für Übersicht
 
-    # MaterialDataPLG (muss vorher über rwinline erst importiert werden)
+    # MaterialDataPLG (muss vorher über s5converter erst importiert werden)
     if not empty_geometry:
         geo_tool_item = bpy.context.scene.geometry_tool_items.add()
         geo_tool_item.mesh_name = mesh_o_name
@@ -2223,10 +2223,7 @@ def set_clipping_for_all_screens(clip_start, clip_end):
 
 def get_converter_exe_location():
     offset = __file__.rfind("\\")
-    exe_loc = __file__[:offset] + "\\RW_inline.exe"
-    # exe_loc = "C:\\Users\\Simon\\AppData\\Roaming\\Blender Foundation\\Blender\\2.79\\scripts\\addons" + "\\RW_inline.exe"
-    # exe_loc = "G:\\Test\\DFF-ANM-Converter\\RW\\RW\\Debug\\RW.exe"
-    # exe_loc = "C:\\Program Files (x86)\\Ubisoft\\Blue Byte\\DIE SIEDLER - Das Erbe der Könige - Gold Edition\\GitRepo\\s5_BlenderPlugin\\BlenderPlugin\\RW_inline_mcb.exe"
+    exe_loc = __file__[:offset] + "\\S5Converter.exe"
     return exe_loc
 
 
