@@ -13,6 +13,7 @@ from bpy.props import StringProperty
 
 DEFAULT_S5_FPS = 24
 MIN_ANIM_NODE_ID = 600
+DEFAULT_START_PREV_KEYFRAME = -123456789
 
 
 # ------------------------------------------------------------
@@ -123,6 +124,58 @@ def get_bone_hanim_data(bone) -> dict | None:
         return dict(data)
     except Exception:
         return data
+
+
+def detect_animation_root_bone(arm_ob: bpy.types.Object):
+    """
+    Erkennt den wahrscheinlichsten Anim-Root im Rig.
+    Kandidaten sind Bones mit NodeID >= 600, deren Parent keine Anim-Node ist.
+    Bei mehreren Kandidaten gewinnt der mit dem größten Anim-Subtree.
+    """
+    candidates = []
+
+    for bone in arm_ob.data.bones:
+        node_id = nodeid_from_bonename(bone.name)
+        if node_id is None or node_id < MIN_ANIM_NODE_ID:
+            continue
+
+        parent_node_id = nodeid_from_bonename(bone.parent.name) if bone.parent else None
+        if parent_node_id is not None and parent_node_id >= MIN_ANIM_NODE_ID:
+            continue
+
+        subtree_count = len(collect_subtree_node_ids(bone))
+        candidates.append((subtree_count, frame_index_from_bonename(bone.name), node_id, bone))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
+    return candidates[0][3]
+
+
+def resolve_export_root_id(arm_ob: bpy.types.Object, filepath: str) -> int:
+    """
+    Nutzt bevorzugt die Root-ID aus dem Dateinamen.
+    Fällt andernfalls auf automatische Rig-Erkennung zurück.
+    """
+    try:
+        return root_id_from_filename(filepath)
+    except Exception as exc:
+        print(f"[INFO] Keine gültige Root-ID im Dateinamen, nutze Auto-Erkennung: {exc}")
+
+    root_bone = detect_animation_root_bone(arm_ob)
+    if not root_bone:
+        raise RuntimeError(
+            "Keine Root-ID im Dateinamen gefunden und kein Anim-Root im Rig erkannt. "
+            "Bitte Dateiname wie '*_600.anm' verwenden oder Rig prüfen."
+        )
+
+    root_id = nodeid_from_bonename(root_bone.name)
+    if root_id is None:
+        raise RuntimeError(f"Automatisch erkannter Root-Bone hat keine gültige NodeID: {root_bone.name}")
+
+    print(f"[INFO] Auto-erkanntes Export-Root: bone={root_bone.name}, nodeID={root_id}")
+    return root_id
 
 
 # ------------------------------------------------------------
@@ -329,6 +382,13 @@ def s5_time_to_frame(t: float, fps: int) -> int:
     return int(round(t * fps))
 
 
+def generate_prev_keyframe_sentinel(source_name: str, root_id: int, bone_count: int) -> int:
+    _ = source_name
+    _ = root_id
+    _ = bone_count
+    return DEFAULT_START_PREV_KEYFRAME
+
+
 # ------------------------------------------------------------
 # Converter-format helpers (duration + nodes[])
 # ------------------------------------------------------------
@@ -488,6 +548,25 @@ def parse_animation_data(js: dict) -> tuple[float, list[list[dict]], str]:
     raise RuntimeError("Unbekanntes JSON-Format. Erwartet HierarchicalAnim oder nodes[].")
 
 
+def extract_start_prev_keyframe_value(js: dict) -> int | None:
+    ha = js.get("HierarchicalAnim")
+    if not ha:
+        return None
+
+    keyframes = ha.get("KeyFrames", [])
+    for key in keyframes:
+        try:
+            time_val = float(key.get("Time", 0.0))
+            prev_val = int(key.get("PrevKeyFrame"))
+        except Exception:
+            continue
+
+        if time_val == 0.0 and prev_val < 0:
+            return prev_val
+
+    return None
+
+
 def parse_animation_json(json_path: str) -> tuple[float, list[list[dict]], str]:
     with open(json_path, "r", encoding="utf-8") as f:
         js = json.load(f)
@@ -539,6 +618,316 @@ def clear_existing_action(arm_ob: bpy.types.Object):
         arm_ob.animation_data.action = None
         return old_action
     return None
+
+
+def store_imported_animation_metadata(arm_ob: bpy.types.Object, action: bpy.types.Action, js: dict):
+    prev_keyframe_value = extract_start_prev_keyframe_value(js)
+    if prev_keyframe_value is None:
+        return
+
+    arm_ob["s5_import_prev_keyframe"] = int(prev_keyframe_value)
+    if action is not None:
+        action["s5_import_prev_keyframe"] = int(prev_keyframe_value)
+
+
+def resolve_start_prev_keyframe_value(
+    arm_ob: bpy.types.Object,
+    action: bpy.types.Action,
+    source_name: str,
+    root_id: int,
+    bone_count: int,
+) -> int:
+    if action is not None and "s5_import_prev_keyframe" in action:
+        try:
+            return int(action["s5_import_prev_keyframe"])
+        except Exception:
+            pass
+
+    if "s5_import_prev_keyframe" in arm_ob:
+        try:
+            return int(arm_ob["s5_import_prev_keyframe"])
+        except Exception:
+            pass
+
+    return generate_prev_keyframe_sentinel(source_name, root_id, bone_count)
+
+
+# ------------------------------------------------------------
+# Export helpers
+# ------------------------------------------------------------
+
+def quat_to_converter_json(q: mu.Quaternion) -> dict:
+    return {
+        "w": float(q.w),
+        "x": float(q.x),
+        "y": float(q.y),
+        "z": float(q.z),
+    }
+
+
+def vec_to_converter_json(v: mu.Vector) -> dict:
+    return {
+        "x": float(v.x),
+        "y": float(v.y),
+        "z": float(v.z),
+    }
+
+
+def quat_to_s5_json(q: mu.Quaternion) -> dict:
+    return {
+        "Real": float(q.w),
+        "Imaginary": {
+            "x": float(q.x),
+            "y": float(q.y),
+            "z": float(q.z),
+        },
+    }
+
+
+def vec_to_s5_json(v: mu.Vector) -> dict:
+    return {
+        "x": float(v.x),
+        "y": float(v.y),
+        "z": float(v.z),
+    }
+
+
+def get_posebone_local_anim_matrix(arm_ob: bpy.types.Object, pb: bpy.types.PoseBone) -> mu.Matrix:
+    """
+    Rekonstruiert die lokale S5-Bone-Matrix aus Restpose + matrix_basis.
+    """
+    rest_local = get_bone_rest_local_matrix(arm_ob, pb.name)
+    return rest_local @ pb.matrix_basis.copy()
+
+
+def collect_keyed_frames_for_bone(
+    action: bpy.types.Action,
+    bone_name: str,
+    frame_start: int,
+    frame_end: int,
+) -> list[int]:
+    """
+    Holt echte Keyframes aus klassischem oder Layered-Action-Setup.
+    Fallback bleibt Vollsampling des Frame-Bereichs.
+    """
+    prefix = f'pose.bones["{bone_name}"].'
+    frames = set()
+
+    fcurves = []
+
+    try:
+        fcurves.extend(list(action.fcurves))
+    except Exception:
+        pass
+
+    try:
+        slots = list(getattr(action, "slots", []))
+        layers = list(getattr(action, "layers", []))
+        for layer in layers:
+            for strip in getattr(layer, "strips", []):
+                channelbag = None
+
+                if slots:
+                    for slot in slots:
+                        try:
+                            channelbag = strip.channelbag(slot)
+                            if channelbag:
+                                fcurves.extend(list(channelbag.fcurves))
+                        except Exception:
+                            continue
+                else:
+                    try:
+                        channelbag = strip.channelbag(action_slot=None)
+                        if channelbag:
+                            fcurves.extend(list(channelbag.fcurves))
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    for fc in fcurves:
+        data_path = getattr(fc, "data_path", "")
+        if not data_path.startswith(prefix):
+            continue
+        for kp in getattr(fc, "keyframe_points", []):
+            frame = int(round(kp.co.x))
+            if frame_start <= frame <= frame_end:
+                frames.add(frame)
+
+    if not frames:
+        if frame_end < frame_start:
+            return [frame_start]
+        return list(range(frame_start, frame_end + 1))
+
+    frames.add(frame_start)
+    frames.add(frame_end)
+    return sorted(frames)
+
+
+def build_converter_track_for_bone(
+    scene: bpy.types.Scene,
+    arm_ob: bpy.types.Object,
+    bone,
+    frames: list[int],
+    fps: int,
+    base_frame: int,
+) -> list[dict]:
+    pb = arm_ob.pose.bones.get(bone.name)
+    if not pb:
+        raise RuntimeError(f"PoseBone nicht gefunden: {bone.name}")
+
+    track = []
+    pb.rotation_mode = "QUATERNION"
+
+    for frame in frames:
+        scene.frame_set(frame)
+        bpy.context.view_layer.update()
+
+        local_anim_mtx = get_posebone_local_anim_matrix(arm_ob, pb)
+        loc = local_anim_mtx.to_translation()
+        quat = local_anim_mtx.to_quaternion()
+
+        track.append({
+            "time": float((frame - base_frame) / fps),
+            "position": vec_to_converter_json(loc),
+            "quaternion": quat_to_converter_json(quat),
+        })
+
+    return track
+
+
+def build_animation_export_json(
+    arm_ob: bpy.types.Object,
+    root_id: int,
+    action: bpy.types.Action,
+    frame_start: int,
+    frame_end: int,
+    fps: int,
+    source_name: str,
+) -> dict:
+    root_bone = find_bone_by_nodeid(arm_ob, root_id)
+    if not root_bone:
+        raise RuntimeError(f"Root-Bone für NodeID {root_id} nicht im Rig gefunden.")
+
+    anim_bones = build_anim_bone_list_from_hanim(arm_ob, root_bone)
+    if not anim_bones:
+        print("[WARN] Keine hanimPLG Node-Reihenfolge gefunden -> fallback Hierarchie.")
+        anim_bones = collect_anim_bones_for_building(root_bone)
+
+    if not anim_bones:
+        raise RuntimeError(f"Keine animierbaren Bones unter Root {root_id} gefunden.")
+
+    duration = max(0.0, float(frame_end - frame_start) / fps)
+    track_entries = []
+
+    for bone in anim_bones:
+        frames = collect_keyed_frames_for_bone(action, bone.name, frame_start, frame_end)
+        track = build_converter_track_for_bone(
+            scene=bpy.context.scene,
+            arm_ob=arm_ob,
+            bone=bone,
+            frames=frames,
+            fps=fps,
+            base_frame=frame_start,
+        )
+
+        entries = []
+        for key in track:
+            entries.append({
+                "Time": float(key["time"]),
+                "Q": quat_to_s5_json(mu.Quaternion((
+                    key["quaternion"]["w"],
+                    key["quaternion"]["x"],
+                    key["quaternion"]["y"],
+                    key["quaternion"]["z"],
+                ))),
+                "T": vec_to_s5_json(mu.Vector((
+                    key["position"]["x"],
+                    key["position"]["y"],
+                    key["position"]["z"],
+                ))),
+            })
+        track_entries.append(entries)
+
+    keyframes = []
+    last_indices = []
+    start_prev_keyframe = resolve_start_prev_keyframe_value(
+        arm_ob=arm_ob,
+        action=action,
+        source_name=source_name,
+        root_id=root_id,
+        bone_count=len(track_entries),
+    )
+
+    for entries in track_entries:
+        if not entries:
+            continue
+        start_entry = dict(entries[0])
+        start_entry["PrevKeyFrame"] = start_prev_keyframe
+        keyframes.append(start_entry)
+        last_indices.append(len(keyframes) - 1)
+
+    for track_idx, entries in enumerate(track_entries):
+        if not entries:
+            continue
+        prev_key_index = last_indices[track_idx]
+        for entry in entries[1:]:
+            out_entry = dict(entry)
+            out_entry["PrevKeyFrame"] = prev_key_index
+            keyframes.append(out_entry)
+            prev_key_index = len(keyframes) - 1
+
+    return {
+        "$schema": "https://github.com/mcb5637/S5Converter/raw/refs/heads/master/schema.json",
+        "HierarchicalAnim": {
+            "InterpolatorTypeId": "HierarchicalAnim",
+            "Flags": 0,
+            "Duration": duration,
+            "KeyFrames": keyframes,
+        },
+        "BuildNum": 10,
+        "VersionNum": 225282,
+        "ConvertRadians": True,
+    }
+
+
+def convert_json_to_anm_external(js: dict, anm_path: str):
+    debug_dir = r"C:/Users/olive/Downloads"
+    debug_name = os.path.splitext(os.path.basename(anm_path))[0] + "_debug_export.json"
+    debug_path = os.path.join(debug_dir, debug_name)
+
+    try:
+        os.makedirs(debug_dir, exist_ok=True)
+        with open(debug_path, "w", encoding="utf-8") as outfile:
+            json.dump(js, outfile, indent=4)
+        print(f"[INFO] Debug-JSON geschrieben: {debug_path}")
+    except Exception as e:
+        print(f"[WARN] Konnte Debug-JSON nicht schreiben: {e}")
+
+    if anm_path.endswith(".json"):
+        with open(anm_path, "w", encoding="utf-8") as outfile:
+            json.dump(js, outfile, indent=4)
+        return
+
+    exe = get_converter_exe_location()
+    if not os.path.isfile(exe):
+        raise FileNotFoundError(f"RW_inline.exe nicht gefunden: {exe}")
+
+    p = subprocess.Popen([exe, "--export"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    js_str = json.dumps(js)
+    bytes_data = js_str.encode("utf-8")
+    outs, errs = p.communicate(input=bytes_data)
+
+    stderr_text = safe_decode_console(errs)
+    if stderr_text:
+        print("[RW_inline stderr]")
+        print(stderr_text)
+
+    try:
+        with open(anm_path, "wb") as outfile:
+            outfile.write(outs)
+    except BrokenPipeError as e:
+        print("[ERROR] BrokenPipe beim Schreiben in Datei {}: {}".format(anm_path, e))
 
 
 # ------------------------------------------------------------
@@ -632,13 +1021,19 @@ def apply_tracks_to_armature(
 def apply_animation_json_to_armature(json_path: str, arm_ob: bpy.types.Object, source_name_for_root: str):
     duration, tracks, source_format = parse_animation_json(json_path)
     root_id = root_id_from_filename(source_name_for_root)
-    return apply_tracks_to_armature(arm_ob, root_id, duration, tracks, source_format)
+    action = apply_tracks_to_armature(arm_ob, root_id, duration, tracks, source_format)
+    with open(json_path, "r", encoding="utf-8") as f:
+        js = json.load(f)
+    store_imported_animation_metadata(arm_ob, action, js)
+    return action
 
 
 def apply_animation_data_to_armature(js: dict, arm_ob: bpy.types.Object, source_name_for_root: str):
     duration, tracks, source_format = parse_animation_data(js)
     root_id = root_id_from_filename(source_name_for_root)
-    return apply_tracks_to_armature(arm_ob, root_id, duration, tracks, source_format)
+    action = apply_tracks_to_armature(arm_ob, root_id, duration, tracks, source_format)
+    store_imported_animation_metadata(arm_ob, action, js)
+    return action
 
 
 def convert_anm_to_json_external(anm_path: str) -> dict:
@@ -671,6 +1066,33 @@ def convert_anm_to_json_external(anm_path: str) -> dict:
         return json.loads(stdout_text)
     except Exception as e:
         raise RuntimeError(f"RW_inline lieferte kein gültiges JSON zurück: {e}")
+
+
+def convert_json_to_anm_external(js: dict, anm_path: str):
+    if anm_path.endswith(".json"):
+        with open(anm_path, "w", encoding="utf-8") as outfile:
+            json.dump(js, outfile, indent=4)
+        return
+
+    exe = get_converter_exe_location()
+    if not os.path.isfile(exe):
+        raise FileNotFoundError(f"RW_inline.exe nicht gefunden: {exe}")
+
+    p = subprocess.Popen([exe, "--export"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    js_str = json.dumps(js)
+    bytes_data = js_str.encode("utf-8")
+    outs, errs = p.communicate(input=bytes_data)
+
+    stderr_text = safe_decode_console(errs)
+    if stderr_text:
+        print("[RW_inline stderr]")
+        print(stderr_text)
+
+    try:
+        with open(anm_path, "wb") as outfile:
+            outfile.write(outs)
+    except BrokenPipeError as e:
+        print("[ERROR] BrokenPipe beim Schreiben in Datei {}: {}".format(anm_path, e))
 
 
 # ------------------------------------------------------------
@@ -722,7 +1144,33 @@ class AnimationExporterANM(Operator, ExportHelper):
 
     def execute(self, context):
         try:
-            self.report({'INFO'}, "Export noch nicht implementiert.")
+            arm_ob = ensure_armature_active()
+            if not arm_ob.animation_data or not arm_ob.animation_data.action:
+                raise RuntimeError("Keine aktive Action auf der Armature gefunden.")
+
+            action = arm_ob.animation_data.action
+            scene = context.scene
+            frame_start = int(scene.frame_start)
+            frame_end = int(scene.frame_end)
+            fps = int(scene.render.fps) if scene.render.fps > 0 else DEFAULT_S5_FPS
+            root_id = resolve_export_root_id(arm_ob, self.filepath)
+
+            current_frame = scene.frame_current
+            try:
+                js = build_animation_export_json(
+                    arm_ob=arm_ob,
+                    root_id=root_id,
+                    action=action,
+                    frame_start=frame_start,
+                    frame_end=frame_end,
+                    fps=fps,
+                    source_name=os.path.basename(self.filepath),
+                )
+                convert_json_to_anm_external(js, self.filepath)
+            finally:
+                scene.frame_set(current_frame)
+
+            self.report({'INFO'}, f"Animation exportiert: {os.path.basename(self.filepath)}")
             return {'FINISHED'}
         except Exception as e:
             self.report({'ERROR'}, str(e))
