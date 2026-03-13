@@ -1,3 +1,6 @@
-BlenderPlugin/.idea/workspace.xml
+BlenderPlugin/.idea/
 *.zip
-.vscode
+.vscode/
+emitters/
+models/
+
