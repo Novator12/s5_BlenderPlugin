@@ -1,6 +1,6 @@
-Siedler 5 DFF-Plugin für Blender 2.79
+**Siedler 5 DFF-Plugin für Blender 5.0.1**
 
-Ein Plugin für Blender 2.79 zur Bearbeitung und Konvertierung von Siedler 5 (The Settlers: Heritage of Kings)-Gebäudemodellen über ein JSON/DFF-Zwischenformat.
+Ein Plugin für Blender 5.0.1 zur Bearbeitung und Konvertierung von Siedler 5 (The Settlers: Heritage of Kings)-Gebäudemodellen über ein JSON/DFF-Zwischenformat.
 
 Operiert mit dem JSON/DFF-Konverter von [@mcb5637](https://github.com/mcb5637/S5Converter)
 
@@ -17,6 +17,8 @@ Operiert mit dem JSON/DFF-Konverter von [@mcb5637](https://github.com/mcb5637/S5
         Geometries
 
         Atomics
+
+        Animations
 
 🛠 Bearbeitung
 
@@ -56,24 +58,34 @@ Operiert mit dem JSON/DFF-Konverter von [@mcb5637](https://github.com/mcb5637/S5
 
     Automatische Generierung von HAnimPLG (Nodes & Parents) beim Export
 
+    Animationen: Namensgebung bei Import nach Siedler 5 Standard notwendig: "pb_foundry2_cannon1_600.anm" 
+    -> RootNode wird aus dem Namen ausgelesen (auch beim Export beachten für späteren Neuimport)
+
 🧪 Geplant
 
-    Generierung von BinMesh-Daten beim Export
+    Import und Export von Skinned Objects
 
-    Import und Export von Animationen für Gebäude
+    Import und Export von Animationen für Skinned Objects
+    
+    Generierung von BinMesh-Daten beim Export
 
 ⚙ Kompatibilität
 
-    Blender-Version: 2.79
+    Blender-Version: 5.0.1
 
-    Python: 3.5.3
+    Python: 3.11.13
 
     Kompatibel mit externen Tools zur DFF-Konvertierung für Siedler 5
 
 📝 Lizenz & Hinweise
 
-    Mathematische Berechnung basiert auf Kimichuras Siedler 5 Plugin (shokimpexp_rigid.py [Quelle: Siedler MP Server, Discord]), sowie Elementen seiner Codestruktur
+    Mathematische Berechnung des Modelimports (.dff) basiert auf Kimichuras Siedler 5 Plugin (shokimpexp_rigid.py [Quelle: Siedler MP Server, Discord]), sowie Elementen seiner Codestruktur
+    Dieses Projekt wird derzeit aus Gründen der Transparenz, zum Testen und zur Zusammenarbeit mit der Community veröffentlicht.
 
+    Teile des Projekts wurden unter Bezug auf ältere Community-Tools und Codestrukturen entwickelt, die innerhalb der Modding-Community geteilt wurden.  
+    
+    Eigenständige Beiträge, die direkt für dieses Repository erstellt wurden, verbleiben bei den jeweiligen Autoren und können unter Absprache gerne genutzt/verbessert werden.
+    
 Dieses Plugin befindet sich in Entwicklung. Es wird empfohlen, regelmäßig Backups der Blender-Dateien zu erstellen.
 Für Fragen, Vorschläge oder Bugs: Issue auf GitHub erstellen.
 
@@ -81,18 +93,19 @@ Für Fragen, Vorschläge oder Bugs: Issue auf GitHub erstellen.
 ⚙️ Neue Funktionen:
 
 User-Data für Decal und Building Bones anlegen:
-![grafik](https://github.com/user-attachments/assets/681dc428-140c-4f79-b9ef-b8c26a35450d)
+<img width="1776" height="1159" alt="grafik" src="https://github.com/user-attachments/assets/96b1f2ad-d947-4fd2-a1d1-464f4a781c87" />
 
 Generierung von Bounding Spheres:
-![grafik](https://github.com/user-attachments/assets/ca1d2f9d-0645-42ce-8d33-fa4f617de3e3)
+<img width="1745" height="1181" alt="grafik" src="https://github.com/user-attachments/assets/4ee488f4-a9fa-4619-bb9a-414fb2fb0e7f" />
 
 Erkennung und additives Hinzufügen von Particle Effekten:
-![grafik](https://github.com/user-attachments/assets/d060aa6d-183b-44d9-8594-d2ad702213b5)
+<img width="1564" height="1129" alt="grafik" src="https://github.com/user-attachments/assets/9cf9b1ef-50a4-4dca-b601-d925c2fb7908" />
 
 Erkennen und anlegen von Materialdaten:
-![grafik](https://github.com/user-attachments/assets/915752d4-ba0f-4853-9f31-a681fe088b48)
+<img width="1800" height="1183" alt="grafik" src="https://github.com/user-attachments/assets/1b913b7f-a9bd-4da6-873f-aa8e8eaf203e" />
 
 Resetten der gesamten Szene:
-![grafik](https://github.com/user-attachments/assets/42643b07-7543-40b8-a68d-86725adcc93f)
+<img width="1728" height="1154" alt="grafik" src="https://github.com/user-attachments/assets/0fc6e5c9-a10f-41cf-801e-7b4272ea9b44" />
+
 
 
