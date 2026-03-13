@@ -8,1468 +8,57 @@ bl_info = {
     "version": (1, 1, 0),
     "blender": (5, 0, 0),
     "location": "File > Import-Export + View3D Sidebar",
-    "description": "Import/Export DFF & JSON (Settlers 5) inkl. UserData/Particle/Geometry Tools",
+    "description": "Import/Export fuer starre Gebaeude und Gebaeude-Animationen (Settlers 5) inkl. UserData/Particle/Geometry Tools",
     "category": "Import-Export",
 }
 
 import bpy
-import os
-import bmesh
-import os.path
-import mathutils as mu
-import mathutils
-import math
-import re
-import os
-import json
-import subprocess
-
-from collections import OrderedDict
 
 # Novator Adds:
 # UserDataPlg Menü und Im- & Export + UI Panel Stuff
 from bpy.types import PropertyGroup
-from bpy.props import StringProperty, EnumProperty
 from bpy.types import UIList
 from bpy.types import Panel
 from bpy.types import Operator
-from bpy_extras.io_utils import ExportHelper, ImportHelper
-from bpy.props import CollectionProperty, IntProperty, StringProperty, EnumProperty, BoolProperty
+from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, StringProperty
 
 # Spherengenerator
 from mathutils import Vector
 
 # Zusatzskripte
-from .particle_effects_data import PARTICLE_EFFECT_LUT
-from .animation_building_imp_exp import AnimationImporterANM, AnimationExporterANM, AnimationImporterJSON
-
+from .building_anm_export import BuildingAnmExportOperator, BuildingAnmJsonExportOperator
+from .building_anm_import import BuildingAnmImportOperator, BuildingAnmJsonImportOperator
+from .building_model_export import (
+    BuildingDffExportOperator,
+    BuildingDffJsonExportOperator,
+    write_building_model,
+)
+from .building_model_import import (
+    BuildingDffImportOperator,
+    BuildingDffJsonImportOperator,
+    read_building_model,
+)
 # Gobals
 AtomicMaterialFX_Data = {}
 ParticleDataList = {}
 
 
-# -------------------------------------------------------Import Functions------------------------------------------
-# -----------------------------------------------------------------------------------------------------------------
-
-
-def mul_matrix(mat, mat2):
-    return mat @ mat2
-
-# https://blender.stackexchange.com/questions/9318/set-a-bones-matrix-to-a-custom-matrix
-
-
-def vec_roll_to_mat3(vec, roll):
-    # port of the updated C function from armature.c
-    # https://developer.blender.org/T39470
-    # note that C accesses columns first, so all matrix indices are swapped compared to the C version
-
-    nor = vec.normalized()
-    THETA_THRESHOLD_NEGY = 1.0e-9
-    THETA_THRESHOLD_NEGY_CLOSE = 1.0e-5
-
-    # create a 3x3 matrix
-    bMatrix = mathutils.Matrix().to_3x3()
-
-    theta = 1.0 + nor[1];
-
-    if (theta > THETA_THRESHOLD_NEGY_CLOSE) or ((nor[0] or nor[2]) and theta > THETA_THRESHOLD_NEGY):
-
-        bMatrix[1][0] = -nor[0];
-        bMatrix[0][1] = nor[0];
-        bMatrix[1][1] = nor[1];
-        bMatrix[2][1] = nor[2];
-        bMatrix[1][2] = -nor[2];
-        if theta > THETA_THRESHOLD_NEGY_CLOSE:
-            # If nor is far enough from -Y, apply the general case.
-            bMatrix[0][0] = 1 - nor[0] * nor[0] / theta;
-            bMatrix[2][2] = 1 - nor[2] * nor[2] / theta;
-            bMatrix[0][2] = bMatrix[2][0] = -nor[0] * nor[2] / theta;
-
-        else:
-            # If nor is too close to -Y, apply the special case.
-            theta = nor[0] * nor[0] + nor[2] * nor[2];
-            bMatrix[0][0] = (nor[0] + nor[2]) * (nor[0] - nor[2]) / -theta;
-            bMatrix[2][2] = -bMatrix[0][0];
-            bMatrix[0][2] = bMatrix[2][0] = 2.0 * nor[0] * nor[2] / theta;
-
-    else:
-        # If nor is -Y, simple symmetry by Z axis.
-        bMatrix = mathutils.Matrix().to_3x3()
-        bMatrix[0][0] = bMatrix[1][1] = -1.0;
-
-    # Make Roll matrix
-    rMatrix = mathutils.Matrix.Rotation(roll, 3, nor)
-
-    # Combine and output result
-    mat = mul_matrix(rMatrix, bMatrix)
-    return mat
-
-
-def mat3_to_vec_roll(mat):
-    # vec ist die "Y-Achse" des Bones (wie im Original-Addon)
-    vec = mat.col[1]
-
-    # Wenn vec quasi null ist, kann man keine sinnvolle Roll-Matrix aufbauen
-    if vec.length < 1.0e-8:
-        return mu.Vector((0.0, 1.0, 0.0)), 0.0
-
-    vecmat = vec_roll_to_mat3(vec, 0)
-
-    # Manche Frames liefern degenerierte Matrizen -> Invert geht dann nicht
-    try:
-        vecmatinv = vecmat.inverted()
-    except Exception:
-        return mu.Vector((0.0, 1.0, 0.0)), 0.0
-
-    rollmat = mul_matrix(vecmatinv, mat)
-    roll = math.atan2(rollmat[0][2], rollmat[2][2])
-    return vec, roll
-
-
-
-def set_material(material):
-    ob = bpy.context.object
-
-    mat = bpy.data.materials.get(material)
-
-    if mat is None:
-        mat = bpy.data.materials.new(name=material)
-
-    if ob.data.materials:
-        ob.data.materials[0] = mat
-    else:
-        ob.data.materials.append(mat)
-
-    return mat
-
-def link_object_and_set_active(obj):
-    bpy.context.collection.objects.link(obj)
-    bpy.context.view_layer.objects.active = obj
-
-def convert_frame_matrix(frame):
-    mat = mu.Matrix()
-    mat[0][0] = frame['rotationMatrix'][0]['x']
-    mat[0][1] = frame['rotationMatrix'][0]['y']
-    mat[0][2] = frame['rotationMatrix'][0]['z']
-    mat[1][0] = frame['rotationMatrix'][1]['x']
-    mat[1][1] = frame['rotationMatrix'][1]['y']
-    mat[1][2] = frame['rotationMatrix'][1]['z']
-    mat[2][0] = frame['rotationMatrix'][2]['x']
-    mat[2][1] = frame['rotationMatrix'][2]['y']
-    mat[2][2] = frame['rotationMatrix'][2]['z']
-    mat[0][3] = 0;
-    mat[1][3] = 0;
-    mat[2][3] = 0;
-    mat[3][0] = 0;
-    mat[3][1] = 0;
-    mat[3][2] = 0;
-    mat[3][3] = 1;
-
-    mat[3][0] = frame['position']['x'];
-    mat[3][1] = frame['position']['y'];
-    mat[3][2] = frame['position']['z'];
-
-    return mat
-
-
-def make_armature_from_frames(js_frames, use_connect):
-    print("make_armature_from_frames-Func")
-    frames = []
-    hierarchy = []
-    nodeIDs = []
-
-    userDatas = []
-    hanimPLGDatas = []
-
-    for index, frameContainer in enumerate(js_frames):
-        frame = frameContainer["frame"];
-
-        parent = frame['parentFrameIndex']
-        frameMatrix = convert_frame_matrix(frame)
-
-        frameMatrix = frameMatrix.transposed()
-
-        frames.append(frameMatrix)
-        hierarchy.append(parent)
-
-        extension = frameContainer["extension"]
-
-        nodeID = None
-        if extension != None and "hanimPLG" in extension:
-            nodeID = extension["hanimPLG"]["nodeID"]
-
-        nodeIDs.append(nodeID)
-
-        userData = None
-        # Novator: Wenn User Data vorhanden beim Import wird auch diese verwendet
-        if extension != None and "userDataPLG" in extension:
-            userDataPLG = extension["userDataPLG"]
-            userData = userDataPLG
-        userDatas.append(userData)
-
-        hanimData = None
-        # Novator: Wenn hanimPLG vorhanden beim Import wird auch diese verwendet
-        if extension != None and "hanimPLG" in extension:
-            hanim_save = extension["hanimPLG"]
-            hanimData = hanim_save
-
-        hanimPLGDatas.append(hanimData)
-        # === BoneManager-Eintrag automatisch erzeugen ===
-        if hasattr(bpy.context.scene, "bone_items"):
-            if nodeID is not None and userData is not None:
-                user_props = userData.get("3dsmax User Properties", [])
-                bone_type = None
-
-                for prop in user_props:
-                    if "Effect=BuildingDecalWithSnow" in prop or "decal=flat" in prop:
-                        bone_type = "DECAL"
-                        break
-                    elif "Effect=SimpleObjectWithSnow" in prop:
-                        bone_type = "BUILDING"
-                        break
-
-                if bone_type is not None:
-                    # Duplikat-Prüfung
-                    existing_ids = [b.bone_name for b in bpy.context.scene.bone_items]
-                    if str(nodeID) not in existing_ids:
-                        new_bone = bpy.context.scene.bone_items.add()
-                        new_bone.bone_index = str(index)
-                        new_bone.bone_name = str(nodeID)
-                        new_bone.bone_type = bone_type
-                        print("Neuer Bone gefunden: {}".format(new_bone))
-                        bpy.context.scene.bone_active_index = len(bpy.context.scene.bone_items) - 1
-
-                        # print("[DEBUG] AutoBoneManager: Hinzugefügt -> ID={}, Typ={}, Index={}".format(nodeID, bone_type, index))
-
-    arm = bpy.data.armatures.new("Armature_Skin")
-    arm_o = bpy.data.objects.new("Armature_Skin", arm)
-    link_object_and_set_active(arm_o)
-
-    if bpy.ops.object.mode_set.poll():
-        bpy.ops.object.mode_set(mode='EDIT')
-
-    ebs = arm.edit_bones
-
-    lengthOfNumbers = 3  # len(str(len(frames)))
-
-    boneNames = []
-
-    for index in range(len(frames)):
-        name = "frame_"
-        name = name + str(index).zfill(lengthOfNumbers)
-        if (nodeIDs[index] != None):
-            name = name + "_" + str(nodeIDs[index])
-
-        boneNames.append(name)
-
-        joint = ebs.new(name)
-
-        parentFrameIndex = hierarchy[index]
-
-        mat4x4 = frames[index]
-
-        while parentFrameIndex != -1:
-            mat4x4 = frames[parentFrameIndex] @ mat4x4
-            parentFrameIndex = hierarchy[parentFrameIndex]
-
-        mat3x3 = mat4x4.to_3x3()
-
-        tail, roll = mat3_to_vec_roll(mat3x3)
-        boneLength = 100
-        joint.head = mat4x4.to_translation()
-        joint.tail = tail * boneLength + joint.head
-        joint.roll = roll
-
-        parent = hierarchy[index]
-        if (parent != -1):
-            joint.parent = ebs[parent]
-            if use_connect:
-                joint.use_connect = True
-
-        if userDatas[index] != None:
-            joint["userData"] = userDatas[index]
-
-        if hanimPLGDatas[index] != None:
-            joint["hanimData"] = hanimPLGDatas[index]
-
-    if bpy.ops.object.mode_set.poll():
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-
-    arm.show_names = True
-    arm_o.show_in_front = True
-
-
-    return arm_o, boneNames, frames, hierarchy
-
-
-def read_rigid_geometry(js_geometry, js_clump, arm_o, frameIndex, frameRestMatrix, boneName, use_connect):
-    print("read_rigid_geometry-Func")
-    print("FrameIndex:{}".format(frameIndex))
-    empty_geometry = False
-
-    if len(js_geometry["morphTargets"][0]) <= 1:  # Check auf leere Geometry, wie bei bspw. Particle Effects
-        empty_geometry = True
-    if bpy.ops.object.mode_set.poll():
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-
-    bm = bmesh.new()
-    wd = bm.verts.layers.deform.verify()
-    uvs = bm.loops.layers.uv.verify()  # HauptUVLayer
-
-    uvs_snow = None
-
-    # Meshname setzen
-    mesh = bpy.data.meshes.new("mesh")
-
-    uv_coordinates = []
-    uv_coordinates_snow = []  # Novator add
-
-    if not empty_geometry:
-        for textureCoords in js_geometry["textureCoordinates"][0]:  # assume one set of texture coordinates...
-            uv_coordinates.append((textureCoords["u"], textureCoords["v"]))
-        # Novator Additional stuff
-        if len(js_geometry["textureCoordinates"]) > 1:
-            uvs_snow = bm.loops.layers.uv.new("UVMap_Snow")  # Name des neuen UV-Layers Novator
-            for textureCoords in js_geometry["textureCoordinates"][1]:  # assume one set of two...
-                uv_coordinates_snow.append((textureCoords["u"], textureCoords["v"]))
-
-    vertex_index = 0;
-
-    if not empty_geometry:
-        for json_vertex in js_geometry["morphTargets"][0]["vertices"]:
-            x = json_vertex["x"]
-            y = json_vertex["y"]
-            z = json_vertex["z"]
-
-            # geometrie an rest position verschieben...
-            xyz = (frameRestMatrix @ mu.Vector((x, y, z, 1))).to_3d()
-            vertex = bm.verts.new(xyz)
-
-            normal = mu.Vector((
-                js_geometry["morphTargets"][0]["normals"][vertex_index]["x"],
-                js_geometry["morphTargets"][0]["normals"][vertex_index]["y"],
-                js_geometry["morphTargets"][0]["normals"][vertex_index]["z"]
-            ))
-
-            ## TODO does this work?
-            vertex.normal = normal
-
-            bm.verts.index_update()
-
-            vertex[wd][0] = 1
-
-            vertex_index = vertex_index + 1
-
-    bm.verts.ensure_lookup_table()
-
-    if not empty_geometry:
-        for json_triangle in js_geometry["triangles"]:
-            v = json_triangle["v1"]
-            v2 = json_triangle["v2"]
-            v3 = json_triangle["v3"]
-            ## TODO material
-            # matIndex = json_triangle["matID"]
-            try:
-                tvs = [bm.verts[v], bm.verts[v2], bm.verts[v3]]
-                face = bm.faces.new(tvs)
-                bm.faces.index_update()
-
-                for vn in tvs:
-                    ln = [l for l in face.loops if l.vert == vn][0]  # bei mehreren faces an einem vert schaut das ob es das richtige face ist
-                    u0, v0 = [uv_coordinates[vn.index][0], uv_coordinates[vn.index][1]]
-                    ln[uvs].uv = (u0, 1.0 - v0)
-                    if uv_coordinates_snow:
-                        u1, v1 = [uv_coordinates_snow[vn.index][0], uv_coordinates_snow[vn.index][1]]
-                        ln[uvs_snow].uv = (u1, 1.0 - v1)
-
-            except ValueError as valueError:
-                print("caught Error: " + valueError.__str__())
-
-    bm.to_mesh(mesh)
-    bm.free()
-    global mesh_count
-    mesh_o_name = "Mesh" + str(mesh_count).zfill(2)
-    mesh_o = bpy.data.objects.new(mesh_o_name, mesh)
-    mesh_count += 1
-
-    vgs = mesh_o.vertex_groups
-
-    vgs.new(name=boneName)  # "frame_"+str(frameIndex).zfill(stringLengthOfFrames))
-
-    arm_mod = mesh_o.modifiers.new(type='ARMATURE', name="skeleton")
-    arm_mod.object = arm_o
-
-    link_object_and_set_active(mesh_o)
-
-    if bpy.ops.object.mode_set.poll():
-        bpy.ops.object.mode_set(mode='EDIT')
-
-
-    # Material Texture auslesen
-    if not empty_geometry:
-        tex_name = js_geometry["materials"][0]["textures"][0]["texture"]
-        material = set_material(tex_name)
-        mesh_o.data.name = tex_name
-    else:
-        tex_name = "Empty-Geometry"
-        mesh_o.data.name = tex_name
-
-    # Novator Additional stuff: Sphere
-    if "sphere" in js_geometry["morphTargets"][0]:
-        sphere = js_geometry["morphTargets"][0]["sphere"]
-        sphere_center = (sphere["x"], sphere["y"], sphere["z"])
-        sphere_radius = sphere["radius"]
-
-        if not empty_geometry:
-            # Namensgebung basierend auf dem Material-String
-            material_texture = js_geometry["materials"][0]["textures"][0]["texture"]
-            if "Decals" in material_texture:
-                sphere_name = "Decal-Sphere"
-            else:
-                sphere_name = "Building-Sphere"
-        else:
-            sphere_name = "Empty-Geometry-Sphere"
-
-        # Sphere erstellen (Blender 5: muss im OBJECT-Mode passieren, sonst bleibt bpy.context.object == mesh_o)
-        prev_mode = None
-        if mesh_o and mesh_o.mode:
-            prev_mode = mesh_o.mode  # 'OBJECT' / 'EDIT' / ...
-
-        if bpy.ops.object.mode_set.poll():
-            bpy.ops.object.mode_set(mode='OBJECT')
-
-        bpy.ops.mesh.primitive_uv_sphere_add(radius=sphere_radius, location=sphere_center)
-        sphere_obj = bpy.context.object
-        sphere_obj.name = sphere_name
-
-        # Sphere dem Mesh zuordnen (Parenting)
-        if sphere_obj == mesh_o:
-            raise RuntimeError("Sphere-Erzeugung lief im Edit-Context -> sphere_obj == mesh_o")
-        sphere_obj.parent = mesh_o
-
-        # Zusätzliche Eigenschaften der Sphere setzen
-        sphere_obj.hide_render = True
-        sphere_obj.display_type = 'WIRE'
-
-        # zurück in den Original-Modus wie im Orig-Flow
-        if prev_mode == 'EDIT' and bpy.ops.object.mode_set.poll():
-            bpy.ops.object.mode_set(mode='EDIT')
-
-
-        # Zusätzliche Eigenschaften der Sphere setzen
-        sphere_obj.hide_render = True  # Unsichtbar im Render
-        sphere_obj.display_type = 'WIRE'  # Drahtmodell für Übersicht
-
-    # MaterialDataPLG (muss vorher über rwinline erst importiert werden)
-    if not empty_geometry:
-        geo_tool_item = bpy.context.scene.geometry_tool_items.add()
-        geo_tool_item.mesh_name = mesh_o_name
-        geo_tool_item.materials.clear()
-
-        # BinMesh nur 1x pro Geometry
-        if js_geometry.get('extension') and 'BinMeshPLG' in js_geometry['extension']:
-            binmesh = js_geometry['extension']['BinMeshPLG']
-            bin_mesh_data = {
-                'Flags': binmesh.get('Flags', {}),
-                'Meshes': binmesh.get('Meshes', [])
-            }
-            geo_tool_item.bin_mesh_data = json.dumps(bin_mesh_data)
-        else:
-            geo_tool_item.bin_mesh_data = "No data"
-
-        # Materials einlesen und auf das GeometryToolItem mappen
-        for mat in js_geometry.get('materials', []):
-            mat_entry = geo_tool_item.materials.add()
-
-            # Materialname (Textur)
-            mat_entry.name = mat.get("textures", [{}])[0].get("texture", "Unknown")
-            mat_entry.texture_alpha = mat.get("textures", [{}])[0].get("textureAlpha", "")
-
-            # Surface Props
-            mat_entry.ambient = bool(mat.get("SurfaceProps", {}).get("ambient", 1))
-            mat_entry.specular = bool(mat.get("SurfaceProps", {}).get("specular", 0))
-            mat_entry.diffuse = bool(mat.get("SurfaceProps", {}).get("diffuse", 1))
-
-            # MaterialFX-Erkennung
-            mat_fx = mat.get("extension", {}).get("MaterialFXMat", {})
-            fx_type = mat_fx.get("Data1", {}).get("Type", "")
-
-            if fx_type == "DualTexture":
-                mat_entry.dual_tex = True
-                mat_entry.snow_texture = mat_fx.get("Data1", {}).get("Texture1", {}).get("texture", "No data")
-            elif fx_type == "UVTransformMat":
-                mat_entry.uv_trans = True
-                mat_entry.snow_texture = "UVTransformMat"
-            else:
-                mat_entry.snow_texture = "No data"
-
-    # Leere Geometry (Empty)
-    elif empty_geometry:
-        geo_tool_item = bpy.context.scene.geometry_tool_items.add()
-        geo_tool_item.mesh_name = mesh_o_name
-        geo_tool_item.bin_mesh_data = "Empty-Geometry"
-        geo_tool_item.materials.clear()
-
-        # Add empty material entry to maintain structure
-        mat_entry = geo_tool_item.materials.add()
-        mat_entry.name = "Empty-Geometry"
-        mat_entry.ambient = False
-        mat_entry.specular = False
-        mat_entry.diffuse = False
-        mat_entry.uv_trans = False
-        mat_entry.dual_tex = False
-        mat_entry.snow_texture = "Empty-Geometry"
-        mat_entry.texture_alpha = ""
-
-
-def read_json_rigid(js, use_connect):
-    print("read_json_rigid-Func")
-    js_clump = js["clump"]
-    arm_o, boneNames, frames, hierarchy = make_armature_from_frames(js_clump["frames"], use_connect)
-    vertexGroups = []
-
-    global mesh_count
-    mesh_count = 1
-
-    for atomic in js_clump["atomics"]:
-        frameIndex = atomic["frameIndex"]  # frameIndex ist in diesem Kontext gleich dem BoneIndex
-        geometryIndex = atomic["geometryIndex"]
-
-        # rest matrix für aktuelles geometry ermitteln
-        mat = frames[frameIndex]
-        index = hierarchy[frameIndex]
-        while hierarchy[index] != -1:
-            mat = frames[index] @ mat
-            index = hierarchy[index]
-        frameRestMatrix = mat
-
-        # aktuelle geometry lesen und erstellen
-        geometry = js_clump["geometries"][geometryIndex]
-        read_rigid_geometry(geometry, js_clump, arm_o, frameIndex, frameRestMatrix, boneNames[frameIndex], use_connect)
-
-    # ----------------- Particle Effect Auto-Detection -------------------
-    global ParticleDataList
-
-    if hasattr(bpy.context.scene, "particle_effects"):
-        used_frame_indices = set()
-
-        # Enum-kompatible Effekt-Namen → immer exakt so schreiben wie in EnumProperty
-        known_effects = {
-            "smoke10",
-            "fire02",
-            "woodchip",
-            "PB_Weathermachine_lightning",
-            "sulfur_spray",
-            "salimTrapIcon",
-            "TMP_resourceGold_Sparkle",
-            "XD_StoneSparkles",
-            "smoke11",
-            "XF_Leaves",
-            "smoke12",
-            "fire01",
-            "firewheel"
-        }
-
-        for atomic in js_clump["atomics"]:
-            frame_index = atomic.get("frameIndex")
-            if frame_index in used_frame_indices:
-                continue
-
-            extension = atomic.get("extension", {})
-            particle_std = extension.get("ParticleStandard", None)
-
-            if "ParticleStandard" in extension:
-                particle_std = extension["ParticleStandard"]
-                ParticleDataList[frame_index] = particle_std
-
-                # Ubisoft-Effekt setzen
-                new_effect = bpy.context.scene.particle_effects.add()
-                new_effect.bone_index = str(frame_index)
-                new_effect.effect_type = "Ubisoft"
-                bpy.context.scene.particle_effects_index = len(bpy.context.scene.particle_effects) - 1
-                used_frame_indices.add(frame_index)
-                continue
-
-            elif particle_std and "Emitters" in particle_std:
-                for emitter in particle_std["Emitters"]:
-                    particle_texture = emitter.get("EmitterStandard", {}).get("ParticleTexture", {})
-                    texture_name = particle_texture.get("texture", "").lower()
-
-                    for effect_type in known_effects:
-                        if effect_type.lower() in texture_name:
-                            new_effect = bpy.context.scene.particle_effects.add()
-                            new_effect.bone_index = str(frame_index)
-                            new_effect.effect_type = effect_type
-                            bpy.context.scene.particle_effects_index = len(bpy.context.scene.particle_effects) - 1
-                            used_frame_indices.add(frame_index)
-
-                            # print("[DEBUG] Particle Effect erkannt: BoneIndex={}, Type={}".format(new_effect.bone_index, effect_type))
-                            break
-                    else:
-                        continue
-                    break
-
-    # ----------------- Atomic Entry Auto-Detection -------------------
-    global AtomicMaterialFX_Data
-    AtomicMaterialFX_Data = globals().get("AtomicMaterialFX_Data", {})
-
-    for atomic in js_clump["atomics"]:
-        extension = atomic.get("extension")
-        frame_index = atomic.get("frameIndex")
-
-        if extension and "MaterialFXAtomic_EffectsEnabled" in extension:
-            if frame_index not in AtomicMaterialFX_Data:
-                AtomicMaterialFX_Data[frame_index] = {
-                    "MaterialFXAtomic_EffectsEnabled": extension["MaterialFXAtomic_EffectsEnabled"]
-                }
-
-    # ----------------- Sphären nachträglich ausblenden -------------------
-    for obj in bpy.data.objects:
-        if obj.type == "MESH" and "Sphere" in obj.name:
-            obj.hide_set(True)
-            obj.hide_render = True
-            # print("[DEBUG] Sphere {} wurde ausgeblendet.".format(obj.name))
-
-
 # -------------------------------------------------------Export Functions------------------------------------------
 # -----------------------------------------------------------------------------------------------------------------
 
-def editBoneToMatrix(bone):
-    translation = bone.head
-    tail = bone.tail - translation
-    tail = tail / 100
-    roll = bone.roll
-    mat3x3 = vec_roll_to_mat3(tail, roll)
-
-    mat4x4 = mat3x3.to_4x4()
-    mat4x4.translation = translation
-
-    return mat4x4
-
-
-def vec3_to_js(vec3):
-    def num(x):
-        return int(x) if x == int(x) else round(x, 6)
-
-    return {
-        "x": num(vec3[0]),
-        "y": num(vec3[1]),
-        "z": num(vec3[2])
-    }
-
-
-def bone_name_to_id(boneName):
-    nodeID = boneName[10:]
-    # print(nodeID, len(nodeID), boneName)
-    if len(nodeID) > 0:
-        return int(nodeID)
-    else:
-        return -1
-
-
-def add_to_export_order(nodeIds, exportOrder, startingBoneID):
-    for i in range(startingBoneID, startingBoneID + 100):
-        if i not in exportOrder:
-            if i in nodeIds:
-                exportOrder.append(i)
-
-
-def getAllChildrenBones(hierarchy, parentId):
-    ids = []
-    for i in range(len(hierarchy)):
-        if (hierarchy[i] == parentId):
-            ids.append(i)
-    return ids
-
-
-def calculateBoneIds(hierarchy, firstIndex):
-    nodeToBoneId = []
-    nodeToBoneId.append(firstIndex)
-
-    children = getAllChildrenBones(hierarchy, nodeToBoneId[0])
-    for child in reversed(children):
-        res = calculateBoneIds(hierarchy, child)
-        for j in res:
-            nodeToBoneId.append(j)
-
-
-def calculateBoneIdsByLength(hierarchy, numKeyframes):
-    firstBone = len(hierarchy) - numKeyframes
-    return calculateBoneIds(hierarchy, firstBone)
-
-
-def generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bone_type_data, hanimPLGDatas):
-    print("generate_frame_list-Func")
-    frameList = []
-    nodeIds = []
-
-    for bone in boneNamesSorted:
-        nodeIds.append(bone_name_to_id(bone))
-
-    frameIndexToNodeId = {}
-    nodeIdToFrameIndex = {}
-    for i in range(len(nodeIds)):
-        frameIndexToNodeId[i] = nodeIds[i]
-        nodeIdToFrameIndex[nodeIds[i]] = i
-
-    exportOrderAuto = []
-    firstBone = nodeIds[1]
-
-    if firstBone >= 500 and firstBone < 600:
-        animationBoneIndexToBoneIndex = calculateBoneIdsByLength(hierarchy, len(hierarchy) - 1)
-        for i in range(len(animationBoneIndexToBoneIndex)):
-            boneID = nodeIds[animationBoneIndexToBoneIndex[i]]
-            if boneID in nodeIds and not boneID in exportOrderAuto:
-                exportOrderAuto.append(boneID)
-    else:
-        exportOrderAuto.append(firstBone)
-
-    add_to_export_order(nodeIds, exportOrderAuto, 600)
-    add_to_export_order(nodeIds, exportOrderAuto, 400)
-    add_to_export_order(nodeIds, exportOrderAuto, 300)
-    add_to_export_order(nodeIds, exportOrderAuto, 200)
-
-    # --- PATCH: Sicherstellen, dass alle vorhandenen Bones exportiert werden
-    for nodeID in nodeIds:
-        if nodeID not in exportOrderAuto:
-            exportOrderAuto.append(nodeID)
-
-    # exportOrderAuto = [nid for nid in exportOrderAuto if nid != -1] --> entfernt die -1 für frame_000 (Dummy Frame)
-    print("Bone-Names-Sorted: {}".format(boneNamesSorted))
-
-    print("ExportOrderAuto: {}".format(exportOrderAuto))
-
-    hierarchyRebasedToOne = []
-    for parent in hierarchy:
-        hierarchyRebasedToOne.append(parent - 1)
-
-    for j, nodeID in enumerate(exportOrderAuto):
-        frameIndex = nodeIdToFrameIndex[nodeID]
-        # print(nodeID, nodeIdToFrameIndex[nodeID], hierarchy[frameIndex], hierarchyRebasedToOne[frameIndex])
-
-    for frameIndex in range(len(hierarchy)):
-        frame = OrderedDict()
-
-        translation = restMatrices[frameIndex].to_translation()
-        mat3x3 = restMatrices[frameIndex].to_3x3()
-
-        frame["frame"] = OrderedDict()
-        frame["frame"]["parentFrameIndex"] = hierarchy[frameIndex]
-        frame["frame"]["position"] = vec3_to_js(translation)
-        frame["frame"]["position"]["x"] = translation[0]
-        frame["frame"]["position"]["y"] = translation[1]
-        frame["frame"]["position"]["z"] = translation[2]
-        mat3x3 = mat3x3.transposed()
-
-        frame["frame"]["rotationMatrix"] = []
-        frame["frame"]["rotationMatrix"].append(vec3_to_js(mat3x3[0]))
-        frame["frame"]["rotationMatrix"].append(vec3_to_js(mat3x3[1]))
-        frame["frame"]["rotationMatrix"].append(vec3_to_js(mat3x3[2]))
-
-        extension = OrderedDict()
-
-        userData = userDatas[frameIndex]
-        hanimData = hanimPLGDatas[frameIndex]
-
-        # Novator Update UserDataPLG:
-        found_bone = False
-        if userData != None:
-            extension['userDataPLG'] = userData
-        elif bone_type_data != None:
-            for bone in bone_type_data:
-                if bone['name'] == str(nodeIds[frameIndex]):
-                    found_bone = True  # Ein passender Bone wurde gefunden
-                    bone_type = bone['type']
-                    if bone_type == 'DECAL':
-                        extension['userDataPLG'] = {'3dsmax User Properties': ['decal=flat', 'Effect=BuildingDecalWithSnow']}
-                    elif bone_type == 'BUILDING':
-                        extension['userDataPLG'] = {'3dsmax User Properties': ['Effect=SimpleObjectWithSnow']}
-
-                # Standardwert nur setzen, wenn kein passender Bone gefunden wurde
-                elif not found_bone and nodeIds[frameIndex] >= 200:
-                    extension['userDataPLG'] = {'3dsmax User Properties': ["tag = {}".format(nodeIds[frameIndex])]}
-        elif userData == None and nodeIds[frameIndex] >= 200:  # Standardwerte setzen wenn keine Bones händisch gesetzt wurden und es keine vorherigen Einträge gibt
-            extension['userDataPLG'] = {'3dsmax User Properties': ["tag = {}".format(nodeIds[frameIndex])]}
-
-        if frameIndex != 0:
-            if hanimData != None:
-                extension['hanimPLG'] = hanimData
-            else:
-                extension['hanimPLG'] = {}
-                extension['hanimPLG']['flags'] = {
-                    "SubHierarchy": False,
-                    "NoMatrices": False,
-                    "UpdateModellingMatrices": False,
-                    "UpdateLTMs": False,
-                    "LocalSpaceMatrices": False
-                }
-                extension['hanimPLG']['keyFrameSize'] = 0
-                extension['hanimPLG']['nodeID'] = nodeIds[frameIndex]
-                extension['hanimPLG']['nodes'] = []
-                extension['hanimPLG']['parents'] = None
-                extension['hanimPLG']['ReBuildNodesArray'] = False
-
-        if frameIndex == 1:
-            if hanimData != None:
-                extension['hanimPLG'] = hanimData
-            else:
-                extension['hanimPLG']['nodes'] = []
-                extension['hanimPLG']['flags'] = {
-                    "SubHierarchy": False,
-                    "NoMatrices": False,
-                    "UpdateModellingMatrices": False,
-                    "UpdateLTMs": False,
-                    "LocalSpaceMatrices": False
-                }  # 28672
-                extension['hanimPLG']['keyFrameSize'] = 36
-                extension['hanimPLG']['ReBuildNodesArray'] = True
-
-        frame["extension"] = extension
-
-        frameList.append(frame)
-
-    return frameList
-
-
-def determine_bone_names_sorted(ob):
-    boneNames = determine_bone_names(ob)
-    # TODO: Why do they need to be sorted? Why are they unordered in the first place??
-    boneNames.sort(key=lambda bone: bone)
-    return boneNames
-
-
-def determine_bone_names(ob):
-    numBones = len(ob.pose.bones)
-    if bpy.ops.object.mode_set.poll():
-        bpy.ops.object.mode_set(mode='EDIT')
-    boneNames = []
-    for frameIndex in range(numBones):
-        bone = ob.data.edit_bones[frameIndex]
-        boneNames.append(bone.name)
-    return boneNames
-
-
-def get_bone_index_by_bone_name(boneNames, name):
-    for i in range(len(boneNames)):
-        if boneNames[i] == name:
-            return i
-
-
-def new_mesh_obj_to_json(mesh_obj, invertedRestMatrix, bone_type_data, geometry_data):
-    print("new_mesh_obj_to_json-Func")
-    verts_local = [v.co.copy() for v in mesh_obj.data.vertices]
-
-    data = OrderedDict()
-    vertices_data = len(verts_local)
-
-    mesh_name = mesh_obj.name
-    if geometry_data and mesh_obj.name in geometry_data:
-        mat_data = geometry_data[mesh_obj.name]
-    else:
-        mat_data = None
-
-    js_vertices = []
-    js_normals = []
-
-    for vert in verts_local:
-        vertex = OrderedDict()
-
-        vtx = vert
-        vtx = (invertedRestMatrix @ vert.to_4d()).to_3d()
-
-        vertex['x'] = vtx[0]
-        vertex['y'] = vtx[1]
-        vertex['z'] = vtx[2]
-        js_vertices.append(vertex)
-
-    for vertex in mesh_obj.data.vertices:
-        normal = OrderedDict()
-        normal['x'] = vertex.normal.x;
-        normal['y'] = vertex.normal.y;
-        normal['z'] = vertex.normal.z;
-        js_normals.append(normal)
-
-    data['morphTargets'] = []
-    has_vertices = len(js_vertices) > 0
-    has_normals = len(js_normals) > 0
-
-    js_morphTarget = {}
-    if has_vertices and has_normals:
-        js_morphTarget['vertices'] = js_vertices
-        js_morphTarget['normals'] = js_normals
-
-    # Novator Export Sphere Stuff
-    # Iteriere durch die Kinder des Hauptmeshes
-    for sphere in mesh_obj.children:
-        # Prüfen, ob die Kinder Sphärendaten enthalten
-        if sphere.type == "MESH" and sphere.data and sphere.data.name.startswith("Sphere"):
-            js_morphTarget['sphere'] = OrderedDict()
-            js_morphTarget['sphere']['x'] = sphere.location.x
-            js_morphTarget['sphere']['y'] = sphere.location.y
-            js_morphTarget['sphere']['z'] = sphere.location.z
-            js_morphTarget['sphere']['radius'] = sphere.dimensions.x / 2  # Radius = Durchmesser / 2
-
-    data['morphTargets'].append(js_morphTarget)
-
-    # Novator12 – Texture Coordinates
-    data['textureCoordinates'] = []
-    for uv_layer in mesh_obj.data.uv_layers:
-        js_textureCoordinates = [None] * vertices_data
-        has_uvs = False  # Tracke, ob überhaupt gültige UVs gesetzt wurden
-
-        for face in mesh_obj.data.polygons:
-            for vert_idx, loop_idx in zip(face.vertices, face.loop_indices):
-                uv_coords = uv_layer.data[loop_idx].uv
-                uv = OrderedDict()
-                uv['u'] = uv_coords.x
-                uv['v'] = 1 - uv_coords.y  # Y-Koordinate invertieren
-                js_textureCoordinates[vert_idx] = uv
-                has_uvs = True
-
-        if has_uvs:
-            data['textureCoordinates'].append(js_textureCoordinates)
-
-    # data['format'] = 65591 # TODO, depends on texture stuff...
-    if len(mesh_obj.data.uv_layers) > 1:
-        # Mehr als ein UV-Layer | Datenformat: 131251
-        data['format'] = {
-            "TriStrip": True,
-            "Positions": True,
-            "NumTextureCoordinates": 2,
-            "PreLit": False,
-            "Normals": True,
-            "Light": True,
-            "ModulateMaterialColor": False,
-            "Native": False,
-            "NativeInstance": False
-        }
-    else:
-        # Nur ein UV-Layer | Datenformat: 65591
-        data['format'] = {
-            "TriStrip": True,
-            "Positions": True,
-            "NumTextureCoordinates": 1,
-            "PreLit": False,
-            "Normals": True,
-            "Light": True,
-            "ModulateMaterialColor": False,
-            "Native": False,
-            "NativeInstance": False
-        }
-
-    if data['textureCoordinates'] == []:  # Wenn leeres Mesh stuff erledigen
-        data['format'] = {
-            "TriStrip": False,
-            "Positions": False,
-            "NumTextureCoordinates": 0,
-            "PreLit": False,
-            "Normals": False,
-            "Light": False,
-            "ModulateMaterialColor": False,
-            "Native": False,
-            "NativeInstance": False
-        }
-
-    # Bin Mesh Data
-    default_flags = {
-        "UnIndexed": False,
-        "Type": "TriList"
-    }
-    if mat_data != None:
-        bin_mesh_raw = mat_data.get("bin_mesh_data", "No data")
-    else:
-        bin_mesh_raw = "No data"
-    data['extension'] = {}
-    if bin_mesh_raw and bin_mesh_raw != "No data":
-        try:
-            bin_mesh_parsed = json.loads(bin_mesh_raw)
-            data['extension']['BinMeshPLG'] = {
-                "Flags": bin_mesh_parsed.get("Flags", default_flags),
-                "Meshes": bin_mesh_parsed.get("Meshes", [])
-            }
-        except json.JSONDecodeError:
-            print("[WARN] Ungültiges JSON in bin_mesh_data für {}, fallback auf leer.".format(mesh_name))
-            data['extension']['BinMeshPLG'] = {
-                "Flags": default_flags,
-                "Meshes": []
-            }
-    else:
-        data['extension']['BinMeshPLG'] = {
-            "Flags": {
-                "UnIndexed": False,
-                "Type": "TriList"
-            },
-            "Meshes": []
-        }
-
-    data['triangles'] = []
-    for face in mesh_obj.data.polygons:
-        triangle = OrderedDict()
-        triangle['v1'] = face.vertices[0]
-        triangle['v2'] = face.vertices[1]
-        triangle['v3'] = face.vertices[2]
-
-        # TODO Material ID
-        triangle['materialId'] = 0
-
-        data['triangles'].append(triangle)
-
-    # Anlegen der Material und Texture Einträge in der Geometry
-
-    data["materials"] = []
-
-    geo_entry = None
-    for item in bpy.context.scene.geometry_tool_items:
-        if item.mesh_name == mesh_obj.name:
-            geo_entry = item
-            break
-
-    if geo_entry is None:
-        print("[WARN] Kein Geometry-Eintrag für Mesh '{}' gefunden.".format(mesh_obj.name))
-        return data  # oder leeres Material setzen
-
-    if any(m.name == "Empty-Geometry" for m in geo_entry.materials):
-        data["materials"] = []
-    else:
-        material_entries = geo_entry.materials
-
-        for mat in material_entries:
-            material = OrderedDict()
-            material["color"] = {"alpha": 255, "red": 255, "green": 255, "blue": 255}
-            material["UnknownInt1"] = 0
-            material["UnknownInt2"] = 237627844
-            material["SurfaceProps"] = {
-                "ambient": int(mat.ambient),
-                "specular": int(mat.specular),
-                "diffuse": int(mat.diffuse)
-            }
-
-            material["extension"] = OrderedDict()
-
-            # FX-Material
-            if mat.uv_trans:
-                material["extension"]["MaterialFXMat"] = {
-                    "Data1": {
-                        "Type": "UVTransformMat",
-                        "Texture1": None, "Texture2": None,
-                        "Coefficient": None, "FrameBufferAlpha": None,
-                        "SrcBlendMode": None, "DstBlendMode": None
-                    },
-                    "Data2": {
-                        "Type": "None",
-                        "Texture1": None, "Texture2": None,
-                        "Coefficient": None, "FrameBufferAlpha": None,
-                        "SrcBlendMode": None, "DstBlendMode": None
-                    },
-                    "Flags": "UVTransform"
-                }
-                material["extension"]["MaterialUVAnim"] = {
-                    "Name": ["13 - Default"]
-                }
-
-            elif mat.dual_tex:
-                material["extension"]["MaterialFXMat"] = {
-                    "Data1": {
-                        "Type": "DualTexture",
-                        "Texture1": {
-                            "texture": mat.snow_texture,
-                            "TexPadding": [0],
-                            "textureAlpha": "",
-                            "TextureAlphaPadding": [0, 116, 28, 196],
-                            "FilterAddressing": {
-                                "FilterMode": "Linear_MipMap_Linear",
-                                "AddressModeU": "Wrap",
-                                "AddressModeV": "Wrap"
-                            },
-                            "UnusedInt1": 0,
-                            "extension": {}
-                        },
-                        "Texture2": None,
-                        "Coefficient": None,
-                        "FrameBufferAlpha": None,
-                        "SrcBlendMode": "rwBLENDSRCALPHA",
-                        "DstBlendMode": "rwBLENDINVSRCALPHA"
-                    },
-                    "Data2": {
-                        "Type": "None",
-                        "Texture1": None, "Texture2": None,
-                        "Coefficient": None, "FrameBufferAlpha": None,
-                        "SrcBlendMode": None, "DstBlendMode": None
-                    },
-                    "Flags": "DualTexture"
-                }
-
-            # TEXTURE
-            texture = OrderedDict()
-            base_tex_name = re.sub(r'\.\d+$', '', mat.name)
-            texture["texture"] = base_tex_name
-            texture["textureAlpha"] = mat.texture_alpha
-            texture["FilterAddressing"] = {
-                "FilterMode": "Linear_MipMap_Linear",
-                "AddressModeU": "Wrap",
-                "AddressModeV": "Wrap"
-            }
-            texture["UnusedInt1"] = 0
-            texture["extension"] = {}
-
-            # Padding-Logik
-            if mat.texture_alpha == base_tex_name + "alpha":
-                texture["TextureAlphaPadding"] = [0, 0]
-                texture["TexPadding"] = [0, 0, 0]
-            elif mat.uv_trans:
-                texture["TextureAlphaPadding"] = [0, 183, 81, 184]
-                texture["TexPadding"] = [0, 0]
-            else:
-                texture["TextureAlphaPadding"] = [0, 7, 46, 196]
-                texture["TexPadding"] = [0, 0]
-
-            material["textures"] = [texture]
-            data["materials"].append(material)
-
-    return data
-
-
-def get_bone_by_name_(bones, name):
-    for bone in bones:
-        if bone.name == name:
-            return bone
-
-
-def append_atomic(frameIndex, geometryIndex, particle_data, bone_type_data):  # Atomic-Func Novator
-    print("append_atomic-Func")
-
-    atomic = OrderedDict()
-    atomic["frameIndex"] = frameIndex
-    atomic["geometryIndex"] = geometryIndex
-    atomic["Flags"] = {
-        "CollisionTest": True,
-        "RenderShadow": False,
-        "Render": True
-    }
-    atomic["UnknownInt1"] = 0  # ggf. noch anpassen wenn bekannt
-    atomic["extension"] = {}
-
-    # ----------------Atomic Extension Writer------------------------------
+def import_building_model_state(path):
     global AtomicMaterialFX_Data, ParticleDataList
-
-    # === 1. Importierte MaterialFX-Daten haben höchste Priorität
-    if frameIndex in AtomicMaterialFX_Data and "MaterialFXAtomic_EffectsEnabled" in AtomicMaterialFX_Data[frameIndex]:
-        atomic["extension"] = {"MaterialFXAtomic_EffectsEnabled": True}
-        return atomic
-
-    # === 2. Bone Match – selbst gesetzte Atomic-Daten basierend auf Boden und Gebäude Texture
-    if bone_type_data:
-        for bone_data in bone_type_data:
-            if str(frameIndex) == bone_data['index']:
-                atomic["extension"] = {"MaterialFXAtomic_EffectsEnabled": True}
-                return atomic
-
-    # === 3. Importierte Particle-Standard-Daten
-    if frameIndex in ParticleDataList:
-        particle_std = ParticleDataList[frameIndex]
-        atomic["extension"]["ParticleStandard"] = particle_std
-        return atomic
-
-    # === 4. Manuell gesetzte Partikeleffekte (UI)
-    if particle_data:
-        for particle in particle_data:
-            if str(frameIndex) == particle['name']:
-                effect_type = particle['type']
-                effect_key = str(effect_type).strip()
-
-                if effect_key == "Ubisoft":
-                    # Ubisoft-Effekt wird automatisch aus importierten Daten übernommen – keine Warnung
-                    return atomic
-
-                if effect_key in PARTICLE_EFFECT_LUT:
-                    atomic["extension"] = PARTICLE_EFFECT_LUT[effect_key]
-                    # print("[DEBUG] Particle Match: frameIndex={}, type={}".format(frameIndex, effect_key))
-                else:
-                    print("[WARN] Unbekannter Partikeleffekt: '{}' – kein Eintrag im LUT".format(effect_key))
-                return atomic
-
-    return atomic
+    AtomicMaterialFX_Data, ParticleDataList = read_building_model(path, AtomicMaterialFX_Data, ParticleDataList)
 
 
-def extract_index_from_frame_name(frame_name):
-    try:
-        parts = frame_name.split("_")
-        if len(parts) == 2 and parts[1].isdigit():  # z. B. frame_000
-            return int(parts[1].lstrip("0")) if parts[1].lstrip("0") != "" else 0
-        elif len(parts) >= 3 and parts[1].isdigit():  # z. B. frame_005_703
-            return int(parts[1].lstrip("0")) if parts[1].lstrip("0") != "" else 0
-    except Exception:
-        pass
-    return -1  # Fehlerwert
-
-
-def get_json_rigid(bone_type_data, particle_data, geometry_data):
-    print("get_json_rigid-Func")
-
-    sce = bpy.context.scene
-    ob = bpy.context.object
-
-    # File-Browser-Kontext: bpy.context.object kann None sein -> Armature in der Scene suchen
-    if ob is None or ob.type != 'ARMATURE':
-        ob = next((o for o in sce.objects if o.type == 'ARMATURE'), None)
-
-    if ob is None:
-        raise RuntimeError("Kein Armature-Objekt gefunden. Bitte Armature auswählen oder im Scene-Tree vorhanden haben.")
-
-    # Für mode_set muss das Armature aktiv sein
-    bpy.context.view_layer.objects.active = ob
-    ob.select_set(True)
-
-    boneNamesSorted = determine_bone_names_sorted(ob)
-
-    if not bpy.ops.object.mode_set.poll():
-        raise RuntimeError("Kann nicht in EDIT-Mode wechseln (kein aktives Armature im passenden Kontext).")
-    bpy.ops.object.mode_set(mode='EDIT')
-
-    hierarchy = []
-    restMatrices = []
-    userDatas = []
-    hanimPLGDatas = []
-
-    # Original Bone-Reihenfolge
-    for frameIndex in range(len(boneNamesSorted)):
-        bone_name = boneNamesSorted[frameIndex]
-        bone = get_bone_by_name_(ob.data.edit_bones, bone_name)
-        if bone.parent:
-            print("Bone_Data: {}".format(bone.parent))
-        if not bone:
-            print("[WARN] Bone {} not found!".format(bone_name))
-            continue
-
-        userDatas.append(bone.get("userData").to_dict() if "userData" in bone else None)
-        hanimPLGDatas.append(bone.get("hanimPLG").to_dict() if "hanimPLG" in bone else None)
-
-        if bone.parent:
-            parentIndex = extract_index_from_frame_name(bone.parent.name)
-        else:
-            parentIndex = -1
-
-        hierarchy.append(parentIndex)
-
-        mat4x4 = editBoneToMatrix(bone)
-        if bone.parent:
-            parentMat = editBoneToMatrix(bone.parent)
-            if parentMat:
-                mat4x4 = parentMat.inverted() @ mat4x4
-        restMatrices.append(mat4x4)
-    print("Hierarchy_Fixed: {}".format(hierarchy))
-    bpy.ops.object.mode_set(mode='OBJECT')  # Sicherer Abschluss des Edit-Modus
-
-    # --- Geometry & Atomics
-    meshesToExport = sorted(
-        [
-            obj for obj in bpy.data.objects
-            if obj.type == 'MESH' and any(m.type == 'ARMATURE' and m.object == ob for m in obj.modifiers)
-        ],
-        key=lambda obj: int(re.search(r'\d+$', obj.name).group()) if re.search(r'\d+$', obj.name) else -1)
-
-    clump = OrderedDict()
-    clump["frames"] = generate_frame_list(boneNamesSorted, hierarchy, restMatrices, userDatas, bone_type_data, hanimPLGDatas)
-
-    clump["atomics"] = []
-    clump["geometries"] = []
-
-    for geometryIndex, mesh in enumerate(meshesToExport):
-        bone_name = mesh.vertex_groups[0].name
-        frameIndex = get_bone_index_by_bone_name(boneNamesSorted, bone_name)
-
-        if frameIndex == -1:
-            print("[WARN] Bone not found for mesh: {}".format(mesh.name))
-            continue
-
-        mat = restMatrices[frameIndex]
-        index = hierarchy[frameIndex]
-        seen = set()  # Sicherheitscheck für Endlosschleifen
-        while index != -1 and index not in seen:
-            seen.add(index)
-            mat = restMatrices[index] @ mat
-            index = hierarchy[index]
-
-        frameRestMatrix = mat
-
-        clump["geometries"].append(
-            new_mesh_obj_to_json(mesh, frameRestMatrix.inverted(), bone_type_data, geometry_data)
-        )
-        clump["atomics"].append(
-            append_atomic(frameIndex, geometryIndex, particle_data, bone_type_data)
-        )
-
-    js = {}
-    js["clump"] = clump
-
-    return js
-
-
-# -------------------------------------------------------------------------------------------------------------------------------------------
-# ----------------------------------------------------------------Import Classes-------------------------------------------------------------
-
-class ModelImporterDFF(Operator, ImportHelper):
-    bl_idname = "import_model.rigid_dff"
-    bl_label = "Novator-Import-Dff (.dff)"  # Novator (Wegen multiplen UV Maps)
-    filename_ext = ".dff"
-    filter_glob: StringProperty(default="*.dff", options={'HIDDEN'})
-
-
-    def execute(self, context):
-        print("ModelImporterDFF-Func")
-        try:
-            set_clipping_for_all_screens(clip_start=0.1, clip_end=10000.0)
-            read_model(self.filepath)
-            return {'FINISHED'}
-        except Exception as e:
-            self.report({'ERROR'}, str(e))
-            return {'CANCELLED'}
-
-
-class ModelImporterJSON(Operator, ImportHelper):
-    bl_idname = "import_model.rigid_json"
-    bl_label = "Novator-Import-JSON (.json)"
-    filename_ext = ".json"
-    filter_glob: StringProperty(default="*.json", options={'HIDDEN'})
-
-
-    def execute(self, context):
-        print("ModelImporterJSON-Func")
-        try:
-            set_clipping_for_all_screens(clip_start=0.1, clip_end=10000.0)
-            read_model(self.filepath)
-            return {'FINISHED'}
-        except Exception as e:
-            self.report({'ERROR'}, str(e))
-            return {'CANCELLED'}
-
-
-# -------------------------------------------------------------------------------------------------------------------------------------------
-# ----------------------------------------------------------------Export Classes-------------------------------------------------------------
-
-class ModelExporterDFF(Operator, ExportHelper):
-    bl_idname = "export_model.rigid_dff"
-    bl_label = "Novator-Export-Dff (.dff)"
-    bl_description = "Exportiere ein Model im DFF-Format mit User Data PLG | "
-    filename_ext = ".dff"
-
-    def execute(self, context):
-        # Bone UserDaten exportieren
-        bone_type_data = [
-            {"index": bone.bone_index, "name": bone.bone_name, "type": bone.bone_type}
-            for bone in context.scene.bone_items
-        ]
-        if bone_type_data == []:
-            bone_type_data = None;
-
-        # Partikel Daten exportieren
-        particle_data = [
-            {"name": particle.bone_index, "type": particle.effect_type}
-            for particle in context.scene.particle_effects
-        ]
-        if particle_data == []:
-            particle_data = None;
-
-        # Material Daten exportieren
-        geometry_data = {
-            geo.mesh_name: {
-                "materials": [
-                    {
-                        "name": mat.name,
-                        "ambient": mat.ambient,
-                        "specular": mat.specular,
-                        "diffuse": mat.diffuse,
-                        "uv_trans": mat.uv_trans,
-                        "dual_tex": mat.dual_tex,
-                        "snow_texture": mat.snow_texture,
-                        "texture_alpha": mat.texture_alpha
-                    }
-                    for mat in geo.materials
-                ],
-                "bin_mesh_data": geo.bin_mesh_data
-            }
-            for geo in context.scene.geometry_tool_items
-        }
-
-        if not geometry_data:
-            geometry_data = None
-
-        # print("[DEBUG] Exporting with bone data: {}".format(bone_type_data))
-        # print("[DEBUG] Exporting with particle data: {}".format(particle_data))
-        # print("[DEBUG] Exporting with material data: {}".format(geometry_data))
-        try:
-            write_model(self.filepath, bone_type_data, particle_data, geometry_data)  # Deine Exportfunktion
-            return {'FINISHED'}
-        except Exception as e:
-            self.report({'ERROR'}, str(e))
-            return {'CANCELLED'}
-
-class ModelExporterJSON(Operator, ExportHelper):
-    bl_idname = "export_model.rigid_json"
-    bl_label = "Novator-Export-Json (.json)"
-    filename_ext = ".json"
-    filter_glob: StringProperty(
-        default="*.json",
-        options={'HIDDEN'},
-    )
-
-    def execute(self, context):
-        bone_type_data = [
-            {"index": bone.bone_index, "name": bone.bone_name, "type": bone.bone_type}
-            for bone in context.scene.bone_items
-        ]
-        if bone_type_data == []:
-            bone_type_data = None;
-
-        # Partikel Daten exportieren
-        particle_data = [
-            {"name": particle.bone_index, "type": particle.effect_type}
-            for particle in context.scene.particle_effects
-        ]
-        if particle_data == []:
-            particle_data = None;
-
-        # Material Daten exportieren
-        geometry_data = {
-            geo.mesh_name: {
-                "materials": [
-                    {
-                        "name": mat.name,
-                        "ambient": mat.ambient,
-                        "specular": mat.specular,
-                        "diffuse": mat.diffuse,
-                        "uv_trans": mat.uv_trans,
-                        "dual_tex": mat.dual_tex,
-                        "snow_texture": mat.snow_texture,
-                        "texture_alpha": mat.texture_alpha
-                    }
-                    for mat in geo.materials
-                ],
-                "bin_mesh_data": geo.bin_mesh_data
-            }
-            for geo in context.scene.geometry_tool_items
-        }
-
-        if not geometry_data:
-            geometry_data = None
-
-        # print("[DEBUG] Exporting with bone data: {}".format(bone_type_data))
-        # print("[DEBUG] Exporting with particle data: {}".format(particle_data))
-        # print("[DEBUG] Exporting with material data: {}".format(geometry_data))
-        try:
-            write_model(self.filepath, bone_type_data, particle_data, geometry_data)
-            return {'FINISHED'}
-        except Exception as e:
-                self.report({'ERROR'}, str(e))
-                return {'CANCELLED'}
+def export_building_model_state(path, bone_type_data, particle_data, geometry_data):
+    write_building_model(path, bone_type_data, particle_data, geometry_data, AtomicMaterialFX_Data, ParticleDataList)
 
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 # ----------------------------------------------------------------Novator Bone Structur-Handler-------------------------------------------------------------
 
-class DynamicBoneItem(PropertyGroup):
+class BoneMappingItem(PropertyGroup):
     bone_index: StringProperty(name="Bone Index", default="")
     bone_name: StringProperty(name="Bone Name", default="")
     bone_type: EnumProperty(
@@ -1483,7 +72,7 @@ class DynamicBoneItem(PropertyGroup):
 
 
 
-class DynamicBoneListUIList(UIList):
+class BoneMappingList(UIList):
     """UIList zur Anzeige der Bones"""
     bl_idname = "DYNAMIC_UL_bone_list"  # Dies ist der Name, auf den Blender verweist
 
@@ -1496,7 +85,7 @@ class DynamicBoneListUIList(UIList):
             layout.alignment = 'CENTER'
 
 
-class BoneManagerPanel(Panel):
+class BoneMappingPanel(Panel):
     """Panel zur Verwaltung der Bones"""
     bl_idname = "VIEW3D_PT_bone_manager"
     bl_label = "Bone Manager"
@@ -1524,7 +113,7 @@ class BoneManagerPanel(Panel):
         row.operator("export_model.reset_bone_items", text="Reset", icon="LOOP_BACK")
 
 
-class AddBoneItem(Operator):
+class AddBoneMappingOperator(Operator):
     bl_idname = "export_model.add_bone_item"
     bl_label = "Add Bone Item"
 
@@ -1537,7 +126,7 @@ class AddBoneItem(Operator):
         return {'FINISHED'}
 
 
-class RemoveBoneItem(Operator):
+class RemoveBoneMappingOperator(Operator):
     bl_idname = "export_model.remove_bone_item"
     bl_label = "Remove Bone Item"
 
@@ -1549,7 +138,7 @@ class RemoveBoneItem(Operator):
         return {'FINISHED'}
 
 
-class ResetBoneItems(Operator):
+class ResetBoneMappingsOperator(Operator):
     bl_idname = "export_model.reset_bone_items"
     bl_label = "Reset Bones"
 
@@ -1562,7 +151,7 @@ class ResetBoneItems(Operator):
 # ---------------------------------------------- Novator Spheren Generator --------------------------------------
 # ---------------------------------------------------------------------------------------------------------------
 
-class CreateSphereOperator(bpy.types.Operator):
+class MeshProxySphereCreateOperator(bpy.types.Operator):
     """Erstellt eine Sphere und parentet sie an das ausgewählte Mesh"""
     bl_idname = "object.create_and_parent_sphere"
     bl_label = "Generate"
@@ -1628,7 +217,7 @@ class CreateSphereOperator(bpy.types.Operator):
         return context.window_manager.invoke_props_dialog(self)
 
 
-class SpherePanel(bpy.types.Panel):
+class MeshProxySpherePanel(bpy.types.Panel):
     """Panel im N-Reiter"""
     bl_label = "Sphere Menu"
     bl_idname = "OBJECT_PT_create_sphere"
@@ -1641,13 +230,13 @@ class SpherePanel(bpy.types.Panel):
         layout.label(text="Create Sphere:")
 
         # Button für die Operator-Dialogbox
-        layout.operator(CreateSphereOperator.bl_idname)
+        layout.operator(MeshProxySphereCreateOperator.bl_idname)
 
 
 # ---------------------------------------------- Novator Particle Menü ------------------------------------------
 # ---------------------------------------------------------------------------------------------------------------
 
-class ParticleEffectItem(PropertyGroup):
+class ParticleEffectBinding(PropertyGroup):
     """Repräsentiert einen Partikeleffekt-Eintrag"""
     bone_index: StringProperty(name="Bone Index", default="")
     effect_type: EnumProperty(
@@ -1751,7 +340,7 @@ class PARTICLE_OT_reset_effects(Operator):
 # ---------------------------------------------- Novator Geometry Menü ------------------------------------------
 # ---------------------------------------------------------------------------------------------------------------
 
-class GeometryMaterialEntry(PropertyGroup):
+class GeometryMaterialRecord(PropertyGroup):
     name: StringProperty(name="Material Name")
     uv_trans: BoolProperty(name="UVTrans", default=False)
     dual_tex: BoolProperty(name="DualTex", default=False)
@@ -1762,9 +351,9 @@ class GeometryMaterialEntry(PropertyGroup):
     texture_alpha: StringProperty(name="Texture Alpha", default="")
 
 
-class GeometryToolItem(PropertyGroup):
+class GeometryExportRecord(PropertyGroup):
     mesh_name: StringProperty(name="Mesh Name", default="No data")
-    materials: CollectionProperty(type=GeometryMaterialEntry)
+    materials: CollectionProperty(type=GeometryMaterialRecord)
     bin_mesh_data: StringProperty(name="BinMesh Data", default="No data")
 
 
@@ -1983,34 +572,35 @@ class SCENE_PT_tools(Panel):
 
 CLASSES = (
     # Import/Export Operatoren
-    ModelImporterDFF,
-    ModelImporterJSON,
-    ModelExporterDFF,
-    ModelExporterJSON,
-    AnimationImporterANM,
-    AnimationExporterANM,
-    AnimationImporterJSON,
+    BuildingDffImportOperator,
+    BuildingDffJsonImportOperator,
+    BuildingDffExportOperator,
+    BuildingDffJsonExportOperator,
+    BuildingAnmImportOperator,
+    BuildingAnmJsonImportOperator,
+    BuildingAnmExportOperator,
+    BuildingAnmJsonExportOperator,
 
     # Deine UI/Property Klassen (wie bei dir vorhanden)
-    DynamicBoneItem,
-    DynamicBoneListUIList,
-    BoneManagerPanel,
-    AddBoneItem,
-    RemoveBoneItem,
-    ResetBoneItems,
+    BoneMappingItem,
+    BoneMappingList,
+    BoneMappingPanel,
+    AddBoneMappingOperator,
+    RemoveBoneMappingOperator,
+    ResetBoneMappingsOperator,
 
-    CreateSphereOperator,
-    SpherePanel,
+    MeshProxySphereCreateOperator,
+    MeshProxySpherePanel,
 
-    ParticleEffectItem,
+    ParticleEffectBinding,
     PARTICLE_UL_effects,
     PARTICLE_PT_tools,
     PARTICLE_OT_add_effect,
     PARTICLE_OT_remove_effect,
     PARTICLE_OT_reset_effects,
 
-    GeometryMaterialEntry,
-    GeometryToolItem,
+    GeometryMaterialRecord,
+    GeometryExportRecord,
     GEOMETRY_UL_tool_entries,
     GEOMETRY_PT_tools,
     GEOMETRY_OT_add_entry,
@@ -2023,51 +613,54 @@ CLASSES = (
     SCENE_PT_tools,
 )
 
-def menu_func_import_ModelDFF(self, context):
-    self.layout.operator(ModelImporterDFF.bl_idname, text=ModelImporterDFF.bl_label)
+def draw_import_building_dff_menu_entry(self, context):
+    self.layout.operator(BuildingDffImportOperator.bl_idname, text=BuildingDffImportOperator.bl_label)
 
-def menu_func_import_ModelJSON(self, context):
-    self.layout.operator(ModelImporterJSON.bl_idname, text=ModelImporterJSON.bl_label)
+def draw_import_building_dff_json_menu_entry(self, context):
+    self.layout.operator(BuildingDffJsonImportOperator.bl_idname, text=BuildingDffJsonImportOperator.bl_label)
 
-def menu_func_import_ModelANM(self, context):
-    self.layout.operator(AnimationImporterANM.bl_idname, text=AnimationImporterANM.bl_label)
+def draw_import_anm_menu_entry(self, context):
+    self.layout.operator(BuildingAnmImportOperator.bl_idname, text=BuildingAnmImportOperator.bl_label)
 
-def menu_func_import_ModelANMJSON(self, context):
-    self.layout.operator(AnimationImporterJSON.bl_idname, text=AnimationImporterJSON.bl_label)
+def draw_import_animation_json_menu_entry(self, context):
+    self.layout.operator(BuildingAnmJsonImportOperator.bl_idname, text=BuildingAnmJsonImportOperator.bl_label)
 
-def menu_func_export_ModelDFF(self, context):
-    self.layout.operator(ModelExporterDFF.bl_idname, text=ModelExporterDFF.bl_label)
+def draw_export_building_dff_menu_entry(self, context):
+    self.layout.operator(BuildingDffExportOperator.bl_idname, text=BuildingDffExportOperator.bl_label)
 
-def menu_func_export_ModelJSON(self, context):
-    self.layout.operator(ModelExporterJSON.bl_idname, text=ModelExporterJSON.bl_label)
+def draw_export_building_dff_json_menu_entry(self, context):
+    self.layout.operator(BuildingDffJsonExportOperator.bl_idname, text=BuildingDffJsonExportOperator.bl_label)
 
-def menu_func_export_ModelANM(self, context):
-    self.layout.operator(AnimationExporterANM.bl_idname, text=AnimationExporterANM.bl_label)
+def draw_export_anm_menu_entry(self, context):
+    self.layout.operator(BuildingAnmExportOperator.bl_idname, text=BuildingAnmExportOperator.bl_label)
+
+def draw_export_anm_json_menu_entry(self, context):
+    self.layout.operator(BuildingAnmJsonExportOperator.bl_idname, text=BuildingAnmJsonExportOperator.bl_label)
 
 
-def register_menu_functions():
+def register_file_menu_entries():
     imp = bpy.types.TOPBAR_MT_file_import
     exp = bpy.types.TOPBAR_MT_file_export
 
-    for fn in (menu_func_import_ModelDFF, menu_func_import_ModelJSON, menu_func_import_ModelANM, menu_func_import_ModelANMJSON):
+    for fn in (draw_import_building_dff_menu_entry, draw_import_building_dff_json_menu_entry, draw_import_anm_menu_entry, draw_import_animation_json_menu_entry):
         try: imp.remove(fn)
         except Exception: pass
         imp.append(fn)
 
-    for fn in (menu_func_export_ModelDFF, menu_func_export_ModelJSON, menu_func_export_ModelANM):
+    for fn in (draw_export_building_dff_menu_entry, draw_export_building_dff_json_menu_entry, draw_export_anm_menu_entry, draw_export_anm_json_menu_entry):
         try: exp.remove(fn)
         except Exception: pass
         exp.append(fn)
 
-def unregister_menu_functions():
+def unregister_file_menu_entries():
     imp = bpy.types.TOPBAR_MT_file_import
     exp = bpy.types.TOPBAR_MT_file_export
 
-    for fn in (menu_func_import_ModelDFF, menu_func_import_ModelJSON, menu_func_import_ModelANM, menu_func_import_ModelANMJSON):
+    for fn in (draw_import_building_dff_menu_entry, draw_import_building_dff_json_menu_entry, draw_import_anm_menu_entry, draw_import_animation_json_menu_entry):
         try: imp.remove(fn)
         except Exception: pass
 
-    for fn in (menu_func_export_ModelDFF, menu_func_export_ModelJSON, menu_func_export_ModelANM):
+    for fn in (draw_export_building_dff_menu_entry, draw_export_building_dff_json_menu_entry, draw_export_anm_menu_entry, draw_export_anm_json_menu_entry):
         try: exp.remove(fn)
         except Exception: pass
 
@@ -2077,19 +670,19 @@ def register():
         bpy.utils.register_class(cls)
 
     # Scene Properties (bei dir sind die teils im “else”-Branch – in 5.x müssen die immer registriert werden)
-    bpy.types.Scene.bone_items = CollectionProperty(type=DynamicBoneItem)
+    bpy.types.Scene.bone_items = CollectionProperty(type=BoneMappingItem)
     bpy.types.Scene.bone_active_index = IntProperty(default=0)
 
-    bpy.types.Scene.particle_effects = CollectionProperty(type=ParticleEffectItem)
+    bpy.types.Scene.particle_effects = CollectionProperty(type=ParticleEffectBinding)
     bpy.types.Scene.particle_effects_index = IntProperty(default=0)
 
-    bpy.types.Scene.geometry_tool_items = CollectionProperty(type=GeometryToolItem)
+    bpy.types.Scene.geometry_tool_items = CollectionProperty(type=GeometryExportRecord)
     bpy.types.Scene.geometry_tool_index = IntProperty(default=0)
 
-    register_menu_functions()
+    register_file_menu_entries()
 
 def unregister():
-    unregister_menu_functions()
+    unregister_file_menu_entries()
 
     # Scene Properties entfernen
     for attr in ("bone_items","bone_active_index","particle_effects","particle_effects_index","geometry_tool_items","geometry_tool_index"):
@@ -2099,81 +692,6 @@ def unregister():
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)
 
-
-# Novator Clipping Extension
-
-def set_clipping_for_all_screens(clip_start, clip_end):
-    """Setze Clipping-Werte für alle Bildschirme und relevante Bereiche"""
-    for screen in bpy.data.screens:  # Iteriere durch alle Bildschirme (Layouts)
-        for area in screen.areas:  # Iteriere durch alle Bereiche in jedem Bildschirm
-            for space in area.spaces:  # Iteriere durch die Spaces in jedem Bereich
-                if hasattr(space, 'clip_start') and hasattr(space, 'clip_end'):
-                    space.clip_start = clip_start
-                    space.clip_end = clip_end
-
-
-def get_converter_exe_location():
-    addon_dir = os.path.dirname(__file__)
-    exe_loc = os.path.join(addon_dir, "S5Converter.exe")
-    return exe_loc
-
-
-def convert_to_js_external(binary_data):
-    print("convert_to_js_external-Func")
-    exe = get_converter_exe_location()
-    if not os.path.isfile(exe):
-        raise FileNotFoundError(f"S5Converter.exe nicht gefunden: {exe}")
-    p = subprocess.Popen([exe, "--import"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    outs, errs = p.communicate(input=binary_data)
-
-    # print("STDOUT:", outs)
-    # print("STDERR:", errs)
-
-    return outs.decode('utf-8')
-
-
-def read_model(path):
-    print("read_model-Func")
-    print(path)
-
-    js = None
-
-    if path.endswith(".dff"):
-        with open(path, 'rb') as file:
-            data = convert_to_js_external(file.read())
-            js = json.loads(data)
-    else:
-        fh = open(path, "r")
-        js = json.load(fh)
-        fh.close()
-
-    read_json_rigid(js, False)
-
-
-def write_model(path, bone_type_data, particle_data, geometry_data):
-    print("write_model-Func")
-    js = get_json_rigid(bone_type_data, particle_data, geometry_data)
-
-    if path.endswith(".json"):
-        with open(path, "w") as outfile:
-            json.dump(js, outfile, indent=4)
-    else:
-        exe = get_converter_exe_location()
-        if not os.path.isfile(exe):
-            raise FileNotFoundError(f"S5Converter.exe nicht gefunden: {exe}")
-        p = subprocess.Popen([exe, "--export"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-        js_str = json.dumps(js)
-        bytes_data = js_str.encode('utf-8')
-
-        outs, errs = p.communicate(input=bytes_data)
-
-        # Export
-        try:
-            with open(path, "wb") as outfile:
-                outfile.write(outs)
-        except BrokenPipeError as e:
-            print("[ERROR] BrokenPipe beim Schreiben in Datei {path}: {}".format(e))
 
 
 if __name__ == "__main__":
