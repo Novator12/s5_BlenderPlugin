@@ -63,6 +63,10 @@ Operiert mit dem JSON/DFF-Konverter von [@mcb5637](https://github.com/mcb5637/S5
 
 🧪 Geplant
 
+    Import und Export von Skinned Objects
+
+    Import und Export von Animationen für Skinned Objects
+    
     Generierung von BinMesh-Daten beim Export
 
 ⚙ Kompatibilität
