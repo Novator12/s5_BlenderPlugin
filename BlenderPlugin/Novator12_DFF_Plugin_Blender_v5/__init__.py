@@ -26,21 +26,21 @@ from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntPropert
 from mathutils import Vector
 
 # Zusatzskripte
-from .building_anm_export import BuildingAnmExportOperator, BuildingAnmJsonExportOperator
-from .building_anm_import import BuildingAnmImportOperator, BuildingAnmJsonImportOperator
+from .building_anm_export import BuildingAnmExportOperator
+from .building_anm_import import BuildingAnmImportOperator
 from .building_model_export import (
-    BuildingDffExportOperator,
-    BuildingDffJsonExportOperator,
+    BuildingExportOperator,
     write_building_model,
 )
+from .unit_model_export import (
+    UnitExportOperator,
+)
 from .building_model_import import (
-    BuildingDffImportOperator,
-    BuildingDffJsonImportOperator,
+    BuildingImportOperator,
     read_building_model,
 )
 from .unit_model_import import (
-    UnitDffImportOperator,
-    UnitDffJsonImportOperator,
+    UnitImportOperator,
     read_unit_model,
 )
 # Gobals
@@ -62,6 +62,12 @@ def import_unit_model_state(path):
 
 def export_building_model_state(path, bone_type_data, particle_data, geometry_data):
     write_building_model(path, bone_type_data, particle_data, geometry_data, AtomicMaterialFX_Data, ParticleDataList)
+
+
+def export_unit_model_state(path, context):
+    from .unit_utilities import write_unit_model
+
+    write_unit_model(path, context)
 
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -581,16 +587,12 @@ class SCENE_PT_tools(Panel):
 
 CLASSES = (
     # Import/Export Operatoren
-    BuildingDffImportOperator,
-    BuildingDffJsonImportOperator,
-    UnitDffImportOperator,
-    UnitDffJsonImportOperator,
-    BuildingDffExportOperator,
-    BuildingDffJsonExportOperator,
+    BuildingImportOperator,
+    UnitImportOperator,
+    BuildingExportOperator,
+    UnitExportOperator,
     BuildingAnmImportOperator,
-    BuildingAnmJsonImportOperator,
     BuildingAnmExportOperator,
-    BuildingAnmJsonExportOperator,
 
     # Deine UI/Property Klassen (wie bei dir vorhanden)
     BoneMappingItem,
@@ -624,35 +626,23 @@ CLASSES = (
     SCENE_PT_tools,
 )
 
-def draw_import_building_dff_menu_entry(self, context):
-    self.layout.operator(BuildingDffImportOperator.bl_idname, text=BuildingDffImportOperator.bl_label)
+def draw_import_building_menu_entry(self, context):
+    self.layout.operator(BuildingImportOperator.bl_idname, text=BuildingImportOperator.bl_label)
 
-def draw_import_building_dff_json_menu_entry(self, context):
-    self.layout.operator(BuildingDffJsonImportOperator.bl_idname, text=BuildingDffJsonImportOperator.bl_label)
-
-def draw_import_unit_dff_menu_entry(self, context):
-    self.layout.operator(UnitDffImportOperator.bl_idname, text=UnitDffImportOperator.bl_label)
-
-def draw_import_unit_dff_json_menu_entry(self, context):
-    self.layout.operator(UnitDffJsonImportOperator.bl_idname, text=UnitDffJsonImportOperator.bl_label)
+def draw_import_unit_menu_entry(self, context):
+    self.layout.operator(UnitImportOperator.bl_idname, text=UnitImportOperator.bl_label)
 
 def draw_import_anm_menu_entry(self, context):
     self.layout.operator(BuildingAnmImportOperator.bl_idname, text=BuildingAnmImportOperator.bl_label)
 
-def draw_import_animation_json_menu_entry(self, context):
-    self.layout.operator(BuildingAnmJsonImportOperator.bl_idname, text=BuildingAnmJsonImportOperator.bl_label)
+def draw_export_building_menu_entry(self, context):
+    self.layout.operator(BuildingExportOperator.bl_idname, text=BuildingExportOperator.bl_label)
 
-def draw_export_building_dff_menu_entry(self, context):
-    self.layout.operator(BuildingDffExportOperator.bl_idname, text=BuildingDffExportOperator.bl_label)
-
-def draw_export_building_dff_json_menu_entry(self, context):
-    self.layout.operator(BuildingDffJsonExportOperator.bl_idname, text=BuildingDffJsonExportOperator.bl_label)
+def draw_export_unit_menu_entry(self, context):
+    self.layout.operator(UnitExportOperator.bl_idname, text=UnitExportOperator.bl_label)
 
 def draw_export_anm_menu_entry(self, context):
     self.layout.operator(BuildingAnmExportOperator.bl_idname, text=BuildingAnmExportOperator.bl_label)
-
-def draw_export_anm_json_menu_entry(self, context):
-    self.layout.operator(BuildingAnmJsonExportOperator.bl_idname, text=BuildingAnmJsonExportOperator.bl_label)
 
 
 def register_file_menu_entries():
@@ -660,18 +650,19 @@ def register_file_menu_entries():
     exp = bpy.types.TOPBAR_MT_file_export
 
     for fn in (
-        draw_import_building_dff_menu_entry,
-        draw_import_building_dff_json_menu_entry,
-        draw_import_unit_dff_menu_entry,
-        draw_import_unit_dff_json_menu_entry,
+        draw_import_building_menu_entry,
+        draw_import_unit_menu_entry,
         draw_import_anm_menu_entry,
-        draw_import_animation_json_menu_entry,
     ):
         try: imp.remove(fn)
         except Exception: pass
         imp.append(fn)
 
-    for fn in (draw_export_building_dff_menu_entry, draw_export_building_dff_json_menu_entry, draw_export_anm_menu_entry, draw_export_anm_json_menu_entry):
+    for fn in (
+        draw_export_building_menu_entry,
+        draw_export_unit_menu_entry,
+        draw_export_anm_menu_entry,
+    ):
         try: exp.remove(fn)
         except Exception: pass
         exp.append(fn)
@@ -681,17 +672,18 @@ def unregister_file_menu_entries():
     exp = bpy.types.TOPBAR_MT_file_export
 
     for fn in (
-        draw_import_building_dff_menu_entry,
-        draw_import_building_dff_json_menu_entry,
-        draw_import_unit_dff_menu_entry,
-        draw_import_unit_dff_json_menu_entry,
+        draw_import_building_menu_entry,
+        draw_import_unit_menu_entry,
         draw_import_anm_menu_entry,
-        draw_import_animation_json_menu_entry,
     ):
         try: imp.remove(fn)
         except Exception: pass
 
-    for fn in (draw_export_building_dff_menu_entry, draw_export_building_dff_json_menu_entry, draw_export_anm_menu_entry, draw_export_anm_json_menu_entry):
+    for fn in (
+        draw_export_building_menu_entry,
+        draw_export_unit_menu_entry,
+        draw_export_anm_menu_entry,
+    ):
         try: exp.remove(fn)
         except Exception: pass
 

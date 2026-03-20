@@ -1,7 +1,7 @@
 import json
 import os
 
-from bpy.props import StringProperty
+from bpy.props import EnumProperty, StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ExportHelper
 
@@ -37,37 +37,46 @@ def _build_active_animation_payload(context, filepath):
     )
 
 
+def _ensure_filepath_extension(filepath, extension):
+    root, _old_ext = os.path.splitext(filepath)
+    return root + extension if root else filepath + extension
+
+
 class BuildingAnmExportOperator(Operator, ExportHelper):
     bl_idname = "export_anim.building_anm"
-    bl_label = "Novator-Export-Buidling-Anm(.anm)"
+    bl_label = "Novator-Export-Buidling-Anm (.anm/.json)"
     filename_ext = ".anm"
-    filter_glob: StringProperty(default="*.anm", options={"HIDDEN"})
+    filter_glob: StringProperty(default="*.anm;*.json", options={"HIDDEN"})
+    file_format: EnumProperty(
+        name="Format",
+        items=(
+            ("ANM", ".anm", "Export as .anm"),
+            ("JSON", ".json", "Export as .json"),
+        ),
+        default="ANM",
+    )
+
+    def check(self, _context):
+        desired_ext = ".anm" if self.file_format == "ANM" else ".json"
+        updated_path = _ensure_filepath_extension(self.filepath, desired_ext)
+        if updated_path != self.filepath:
+            self.filepath = updated_path
+            return True
+        return False
+
+    def draw(self, _context):
+        self.layout.prop(self, "file_format")
 
     def execute(self, context):
         current_frame = context.scene.frame_current
+        export_path = _ensure_filepath_extension(self.filepath, ".anm" if self.file_format == "ANM" else ".json")
         try:
-            payload = _build_active_animation_payload(context, self.filepath)
-            convert_json_to_anm_external(payload, self.filepath)
-            return {"FINISHED"}
-        except Exception as exc:
-            self.report({"ERROR"}, str(exc))
-            return {"CANCELLED"}
-        finally:
-            context.scene.frame_set(current_frame)
-
-
-class BuildingAnmJsonExportOperator(Operator, ExportHelper):
-    bl_idname = "export_anim.building_anm_json"
-    bl_label = "Novator-Export-Buidling-Anm-Json(.json)"
-    filename_ext = ".json"
-    filter_glob: StringProperty(default="*.json", options={"HIDDEN"})
-
-    def execute(self, context):
-        current_frame = context.scene.frame_current
-        try:
-            payload = _build_active_animation_payload(context, self.filepath)
-            with open(self.filepath, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=4)
+            payload = _build_active_animation_payload(context, export_path)
+            if self.file_format == "ANM":
+                convert_json_to_anm_external(payload, export_path)
+            else:
+                with open(export_path, "w", encoding="utf-8") as handle:
+                    json.dump(payload, handle, indent=4)
             return {"FINISHED"}
         except Exception as exc:
             self.report({"ERROR"}, str(exc))

@@ -607,7 +607,7 @@ def _build_geometry_format(mesh_object, texture_coordinate_sets):
 
 
 def _build_bin_mesh_extension(metadata_entry):
-    default_flags = {"UnIndexed": False, "Type": "TriList"}
+    default_flags = {"UnIndexed": False, "Type": "TriStrip"}
     raw_bin_mesh = metadata_entry.get("bin_mesh_data", "No data") if metadata_entry else "No data"
 
     if raw_bin_mesh and raw_bin_mesh != "No data":

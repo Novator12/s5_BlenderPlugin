@@ -1,3 +1,5 @@
+import os
+
 from bpy.props import StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ImportHelper
@@ -12,31 +14,23 @@ from .building_utilities import (
 
 class BuildingAnmImportOperator(Operator, ImportHelper):
     bl_idname = "import_anim.building_anm"
-    bl_label = "Novator-Import-Buidling-Anm(.anm)"
+    bl_label = "Novator-Import-Buidling-Anm (.anm/.json)"
     filename_ext = ".anm"
-    filter_glob: StringProperty(default="*.anm", options={"HIDDEN"})
+    filter_glob: StringProperty(default="*.anm;*.json", options={"HIDDEN"})
 
     def execute(self, context):
+        file_ext = os.path.splitext(self.filepath)[1].lower()
+
         try:
             armature_object = ensure_armature_active()
-            payload = convert_anm_to_json_external(self.filepath)
-            apply_animation_data_to_armature(payload, armature_object, self.filepath)
-            return {"FINISHED"}
-        except Exception as exc:
-            self.report({"ERROR"}, str(exc))
-            return {"CANCELLED"}
-
-
-class BuildingAnmJsonImportOperator(Operator, ImportHelper):
-    bl_idname = "import_anim.building_anm_json"
-    bl_label = "Novator-Import-Buidling-Anm-Json(.json)"
-    filename_ext = ".json"
-    filter_glob: StringProperty(default="*.json", options={"HIDDEN"})
-
-    def execute(self, context):
-        try:
-            armature_object = ensure_armature_active()
-            apply_animation_json_to_armature(self.filepath, armature_object, self.filepath)
+            if file_ext == ".anm":
+                payload = convert_anm_to_json_external(self.filepath)
+                apply_animation_data_to_armature(payload, armature_object, self.filepath)
+            elif file_ext == ".json":
+                apply_animation_json_to_armature(self.filepath, armature_object, self.filepath)
+            else:
+                self.report({"ERROR"}, "Unsupported animation import type: {}".format(file_ext or "<none>"))
+                return {"CANCELLED"}
             return {"FINISHED"}
         except Exception as exc:
             self.report({"ERROR"}, str(exc))

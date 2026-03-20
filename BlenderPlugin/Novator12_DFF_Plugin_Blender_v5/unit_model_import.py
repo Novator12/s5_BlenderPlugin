@@ -1,3 +1,5 @@
+import os
+
 from bpy.props import StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ImportHelper
@@ -16,32 +18,19 @@ def read_unit_model(path):
     return import_unit_clump(payload, unit_name_from_path(path), False)
 
 
-class UnitDffImportOperator(Operator, ImportHelper):
-    bl_idname = "import_model.unit_dff"
-    bl_label = "Novator-Import-Unit-Dff (.dff)"
+class UnitImportOperator(Operator, ImportHelper):
+    bl_idname = "import_model.unit"
+    bl_label = "Novator-Import-Unit (.dff/.json)"
     filename_ext = ".dff"
-    filter_glob: StringProperty(default="*.dff", options={"HIDDEN"})
+    filter_glob: StringProperty(default="*.dff;*.json", options={"HIDDEN"})
 
     def execute(self, context):
         from . import import_unit_model_state
 
-        try:
-            set_clipping_for_all_screens(clip_start=0.1, clip_end=10000.0)
-            import_unit_model_state(self.filepath)
-            return {"FINISHED"}
-        except Exception as exc:
-            self.report({"ERROR"}, str(exc))
+        file_ext = os.path.splitext(self.filepath)[1].lower()
+        if file_ext not in {".dff", ".json"}:
+            self.report({"ERROR"}, "Unsupported unit import type: {}".format(file_ext or "<none>"))
             return {"CANCELLED"}
-
-
-class UnitDffJsonImportOperator(Operator, ImportHelper):
-    bl_idname = "import_model.unit_dff_json"
-    bl_label = "Novator-Import-Unit-Dff-Json (.json)"
-    filename_ext = ".json"
-    filter_glob: StringProperty(default="*.json", options={"HIDDEN"})
-
-    def execute(self, context):
-        from . import import_unit_model_state
 
         try:
             set_clipping_for_all_screens(clip_start=0.1, clip_end=10000.0)
