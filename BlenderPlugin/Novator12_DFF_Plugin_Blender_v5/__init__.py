@@ -38,6 +38,11 @@ from .building_model_import import (
     BuildingDffJsonImportOperator,
     read_building_model,
 )
+from .unit_model_import import (
+    UnitDffImportOperator,
+    UnitDffJsonImportOperator,
+    read_unit_model,
+)
 # Gobals
 AtomicMaterialFX_Data = {}
 ParticleDataList = {}
@@ -49,6 +54,10 @@ ParticleDataList = {}
 def import_building_model_state(path):
     global AtomicMaterialFX_Data, ParticleDataList
     AtomicMaterialFX_Data, ParticleDataList = read_building_model(path, AtomicMaterialFX_Data, ParticleDataList)
+
+
+def import_unit_model_state(path):
+    read_unit_model(path)
 
 
 def export_building_model_state(path, bone_type_data, particle_data, geometry_data):
@@ -574,6 +583,8 @@ CLASSES = (
     # Import/Export Operatoren
     BuildingDffImportOperator,
     BuildingDffJsonImportOperator,
+    UnitDffImportOperator,
+    UnitDffJsonImportOperator,
     BuildingDffExportOperator,
     BuildingDffJsonExportOperator,
     BuildingAnmImportOperator,
@@ -619,6 +630,12 @@ def draw_import_building_dff_menu_entry(self, context):
 def draw_import_building_dff_json_menu_entry(self, context):
     self.layout.operator(BuildingDffJsonImportOperator.bl_idname, text=BuildingDffJsonImportOperator.bl_label)
 
+def draw_import_unit_dff_menu_entry(self, context):
+    self.layout.operator(UnitDffImportOperator.bl_idname, text=UnitDffImportOperator.bl_label)
+
+def draw_import_unit_dff_json_menu_entry(self, context):
+    self.layout.operator(UnitDffJsonImportOperator.bl_idname, text=UnitDffJsonImportOperator.bl_label)
+
 def draw_import_anm_menu_entry(self, context):
     self.layout.operator(BuildingAnmImportOperator.bl_idname, text=BuildingAnmImportOperator.bl_label)
 
@@ -642,7 +659,14 @@ def register_file_menu_entries():
     imp = bpy.types.TOPBAR_MT_file_import
     exp = bpy.types.TOPBAR_MT_file_export
 
-    for fn in (draw_import_building_dff_menu_entry, draw_import_building_dff_json_menu_entry, draw_import_anm_menu_entry, draw_import_animation_json_menu_entry):
+    for fn in (
+        draw_import_building_dff_menu_entry,
+        draw_import_building_dff_json_menu_entry,
+        draw_import_unit_dff_menu_entry,
+        draw_import_unit_dff_json_menu_entry,
+        draw_import_anm_menu_entry,
+        draw_import_animation_json_menu_entry,
+    ):
         try: imp.remove(fn)
         except Exception: pass
         imp.append(fn)
@@ -656,7 +680,14 @@ def unregister_file_menu_entries():
     imp = bpy.types.TOPBAR_MT_file_import
     exp = bpy.types.TOPBAR_MT_file_export
 
-    for fn in (draw_import_building_dff_menu_entry, draw_import_building_dff_json_menu_entry, draw_import_anm_menu_entry, draw_import_animation_json_menu_entry):
+    for fn in (
+        draw_import_building_dff_menu_entry,
+        draw_import_building_dff_json_menu_entry,
+        draw_import_unit_dff_menu_entry,
+        draw_import_unit_dff_json_menu_entry,
+        draw_import_anm_menu_entry,
+        draw_import_animation_json_menu_entry,
+    ):
         try: imp.remove(fn)
         except Exception: pass
 
