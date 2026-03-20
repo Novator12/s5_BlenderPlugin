@@ -6,13 +6,14 @@ from .building_utilities import get_converter_exe_location, set_clipping_for_all
 from .unit_utilities import (
     import_unit_clump,
     load_unit_model_payload,
+    unit_name_from_path,
 )
 
 
 def read_unit_model(path):
     converter_path = get_converter_exe_location()
     payload = load_unit_model_payload(path, converter_path)
-    return import_unit_clump(payload, False)
+    return import_unit_clump(payload, unit_name_from_path(path), False)
 
 
 class UnitDffImportOperator(Operator, ImportHelper):

@@ -1,5 +1,6 @@
 import bmesh
 import bpy
+import os
 
 from .building_utilities import (
     frame_dict_to_matrix,
@@ -10,12 +11,16 @@ from .building_utilities import (
 
 
 BONE_NAME_PADDING = 3
-BONE_DISPLAY_LENGTH = 100.0
+BONE_DISPLAY_LENGTH = 10.0 # BoneSize in Blender
 WEIGHT_EPSILON = 1.0e-6
 
 
 def load_unit_model_payload(path, converter_path):
     return load_building_model_payload(path, converter_path)
+
+
+def unit_name_from_path(path):
+    return os.path.splitext(os.path.basename(path))[0]
 
 
 def _extract_frame_metadata(frame_container):
@@ -48,11 +53,41 @@ def _format_bone_name(frame_index, node_id):
     return f"{base_name}_{node_id}" if node_id is not None else base_name
 
 
+def _build_hanim_node_index_map(frame_containers, node_ids):
+    node_id_to_frame_index = {}
+    for frame_index, node_id in enumerate(node_ids):
+        if node_id is not None and node_id not in node_id_to_frame_index:
+            node_id_to_frame_index[node_id] = frame_index
+
+    for frame_container in frame_containers:
+        extension = frame_container.get("extension", {})
+        hanim_data = extension.get("hanimPLG")
+        if not hanim_data:
+            continue
+
+        nodes = hanim_data.get("nodes", [])
+        if not nodes:
+            continue
+
+        node_index_to_frame_index = {}
+        for node_entry in nodes:
+            node_index = node_entry.get("nodeIndex")
+            node_id = node_entry.get("nodeID")
+            frame_index = node_id_to_frame_index.get(node_id)
+            if node_index is None or frame_index is None:
+                continue
+            node_index_to_frame_index[int(node_index)] = frame_index
+        return node_index_to_frame_index
+
+    return {}
+
+
 def build_unit_armature_from_frames(frame_containers, use_connect):
     metadata_entries = [_extract_frame_metadata(frame_container) for frame_container in frame_containers]
     frames = [entry["matrix"] for entry in metadata_entries]
     hierarchy = [entry["parent_index"] for entry in metadata_entries]
     node_ids = [entry["node_id"] for entry in metadata_entries]
+    node_index_to_frame_index = _build_hanim_node_index_map(frame_containers, node_ids)
 
     armature = bpy.data.armatures.new("Armature_UnitSkin")
     armature_object = bpy.data.objects.new("Armature_UnitSkin", armature)
@@ -92,7 +127,7 @@ def build_unit_armature_from_frames(frame_containers, use_connect):
 
     armature.show_names = True
     armature_object.show_in_front = True
-    return armature_object, bone_names
+    return armature_object, bone_names, node_index_to_frame_index
 
 
 def _extract_uv_coordinates(geometry_data, bm):
@@ -171,29 +206,13 @@ def _assign_unit_materials(mesh_object, geometry_data, mesh_index):
         _ensure_material_slot(mesh_object.data, material_name)
 
 
-def _sanitize_name_fragment(value):
-    text = str(value).strip()
-    if not text:
-        return "UnitPart"
-    return text.replace(" ", "_").replace("/", "_").replace("\\", "_")
+def _determine_unit_mesh_name(unit_name, mesh_index, mesh_count):
+    if mesh_count <= 1:
+        return unit_name
+    return "{}{}".format(unit_name, mesh_index)
 
 
-def _determine_unit_mesh_name(geometry_data, mesh_index, frame_index):
-    materials = geometry_data.get("materials", [])
-    if materials:
-        textures = materials[0].get("textures", [])
-        if textures:
-            texture_name = textures[0].get("texture", "")
-            if texture_name:
-                return "{}_{:02d}_f{:03d}".format(
-                    _sanitize_name_fragment(texture_name),
-                    mesh_index,
-                    int(frame_index),
-                )
-    return "UnitMesh{:02d}_f{:03d}".format(mesh_index, int(frame_index))
-
-
-def _build_unit_mesh_object(geometry_data, armature_object, mesh_index, frame_index):
+def _build_unit_mesh_object(geometry_data, armature_object, mesh_name, mesh_index):
     if bpy.ops.object.mode_set.poll():
         bpy.ops.object.mode_set(mode="OBJECT")
 
@@ -204,7 +223,6 @@ def _build_unit_mesh_object(geometry_data, armature_object, mesh_index, frame_in
     _populate_vertices(bm, geometry_data)
     _populate_faces(bm, uv_layer, snow_uv_layer, geometry_data, primary_uvs, secondary_uvs)
 
-    mesh_name = _determine_unit_mesh_name(geometry_data, mesh_index, frame_index)
     mesh = bpy.data.meshes.new(mesh_name)
     bm.to_mesh(mesh)
     bm.free()
@@ -212,7 +230,6 @@ def _build_unit_mesh_object(geometry_data, armature_object, mesh_index, frame_in
 
     mesh_object = bpy.data.objects.new(mesh_name, mesh)
     link_object_in_active_collection(mesh_object)
-    mesh_object.parent = armature_object
 
     armature_modifier = mesh_object.modifiers.new(type="ARMATURE", name="skeleton")
     armature_modifier.object = armature_object
@@ -232,19 +249,20 @@ def _unpack_vertex_bone_slots(packed_value):
     ]
 
 
-def _resolve_frame_index_from_skin_slot(slot, used_bones, bone_names):
-    if 0 <= slot < len(used_bones):
-        mapped_frame_index = int(used_bones[slot])
-        if 0 <= mapped_frame_index < len(bone_names):
-            return mapped_frame_index
+def _resolve_frame_index_from_skin_slot(slot, used_bones, node_index_to_frame_index):
+    if slot in node_index_to_frame_index:
+        return node_index_to_frame_index[slot]
 
-    if 0 <= slot < len(bone_names):
-        return slot
+    if 0 <= slot < len(used_bones):
+        node_index = int(used_bones[slot])
+        mapped_frame_index = node_index_to_frame_index.get(node_index)
+        if mapped_frame_index is not None:
+            return mapped_frame_index
 
     return None
 
 
-def _assign_skinning(mesh_object, geometry_data, bone_names):
+def _assign_skinning(mesh_object, geometry_data, bone_names, node_index_to_frame_index):
     skin_plg = geometry_data.get("extension", {}).get("SkinPLG")
     if not skin_plg:
         return
@@ -260,22 +278,34 @@ def _assign_skinning(mesh_object, geometry_data, bone_names):
 
         weights = vertex_bone_weights[vertex_index]
         bone_slots = _unpack_vertex_bone_slots(packed_indices)
+        assignments = {}
 
         for channel_index, weight_key in enumerate(weight_keys):
             weight = float(weights.get(weight_key, 0.0))
             if weight <= WEIGHT_EPSILON:
                 continue
 
-            frame_index = _resolve_frame_index_from_skin_slot(bone_slots[channel_index], used_bones, bone_names)
+            frame_index = _resolve_frame_index_from_skin_slot(
+                bone_slots[channel_index],
+                used_bones,
+                node_index_to_frame_index,
+            )
             if frame_index is None:
                 continue
 
             bone_name = bone_names[frame_index]
+            assignments[bone_name] = assignments.get(bone_name, 0.0) + weight
+
+        total_weight = sum(assignments.values())
+        if total_weight <= WEIGHT_EPSILON:
+            continue
+
+        for bone_name, combined_weight in assignments.items():
             vertex_group = mesh_object.vertex_groups.get(bone_name)
             if vertex_group is None:
                 vertex_group = mesh_object.vertex_groups.new(name=bone_name)
 
-            vertex_group.add([vertex_index], weight, "REPLACE")
+            vertex_group.add([vertex_index], combined_weight / total_weight, "REPLACE")
 
 
 def _create_selection_sphere(mesh_object, sphere_data):
@@ -290,7 +320,7 @@ def _create_selection_sphere(mesh_object, sphere_data):
         location=(sphere_data["x"], sphere_data["y"], sphere_data["z"]),
     )
     sphere_object = bpy.context.object
-    sphere_object.name = f"{mesh_object.name}_SelectionSphere"
+    sphere_object.name = "{}_SelectionSphere".format(mesh_object.name)
     sphere_object.parent = mesh_object
     sphere_object.display_type = "WIRE"
     sphere_object.hide_render = True
@@ -300,23 +330,31 @@ def _create_selection_sphere(mesh_object, sphere_data):
     sphere_object["s5_sphere_type"] = "SelectionSphere"
 
 
-def build_unit_geometry(geometry_data, armature_object, bone_names, mesh_index, frame_index):
-    mesh_object = _build_unit_mesh_object(geometry_data, armature_object, mesh_index, frame_index)
-    _assign_skinning(mesh_object, geometry_data, bone_names)
+def build_unit_geometry(geometry_data, armature_object, bone_names, node_index_to_frame_index, mesh_name, mesh_index):
+    mesh_object = _build_unit_mesh_object(geometry_data, armature_object, mesh_name, mesh_index)
+    _assign_skinning(mesh_object, geometry_data, bone_names, node_index_to_frame_index)
 
     morph_target = geometry_data.get("morphTargets", [{}])[0]
     _create_selection_sphere(mesh_object, morph_target.get("sphere"))
     return mesh_object
 
 
-def import_unit_clump(js, use_connect=False):
+def import_unit_clump(js, unit_name, use_connect=False):
     clump_data = js["clump"]
-    armature_object, bone_names = build_unit_armature_from_frames(clump_data["frames"], use_connect)
+    armature_object, bone_names, node_index_to_frame_index = build_unit_armature_from_frames(clump_data["frames"], use_connect)
+    mesh_count = len(clump_data.get("atomics", []))
 
     for mesh_index, atomic_entry in enumerate(clump_data.get("atomics", []), start=1):
         geometry_index = atomic_entry["geometryIndex"]
-        frame_index = atomic_entry.get("frameIndex", 0)
         geometry_data = clump_data["geometries"][geometry_index]
-        build_unit_geometry(geometry_data, armature_object, bone_names, mesh_index, frame_index)
+        mesh_name = _determine_unit_mesh_name(unit_name, mesh_index, mesh_count)
+        build_unit_geometry(
+            geometry_data,
+            armature_object,
+            bone_names,
+            node_index_to_frame_index,
+            mesh_name,
+            mesh_index,
+        )
 
     return armature_object
