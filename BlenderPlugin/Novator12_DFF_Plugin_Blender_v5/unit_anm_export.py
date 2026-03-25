@@ -5,16 +5,15 @@ from bpy.props import EnumProperty, StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ExportHelper
 
-from .building_utilities import (
-    DEFAULT_S5_FPS,
-    build_animation_export_json,
+from .unit_utilities import (
+    build_unit_animation_payload_for_action,
+    build_active_unit_animation_payload,
     collect_armature_actions,
     convert_json_to_anm_external,
     ensure_action_export_name,
     ensure_armature_active,
     isolate_action_for_export,
     restore_action_after_export,
-    resolve_export_root_id,
 )
 
 
@@ -30,54 +29,14 @@ def _resolve_armature_for_ui(context):
     return next((obj for obj in scene.objects if obj.type == "ARMATURE"), None)
 
 
-def _resolve_action_frame_range(action, scene):
-    if action is None:
-        return int(scene.frame_start), int(scene.frame_end)
-
-    try:
-        frame_start = int(round(action.frame_range[0]))
-        frame_end = int(round(action.frame_range[1]))
-    except Exception:
-        frame_start = int(scene.frame_start)
-        frame_end = int(scene.frame_end)
-
-    if frame_end < frame_start:
-        frame_end = frame_start
-    return frame_start, frame_end
-
-
-def _build_animation_payload(context, filepath, action=None):
-    armature_object = ensure_armature_active()
-    active_action = action
-    if active_action is None and armature_object.animation_data:
-        active_action = armature_object.animation_data.action
-    if active_action is None:
-        raise RuntimeError("Keine aktive Action auf der Armature gefunden.")
-
-    scene = context.scene
-    frame_start, frame_end = _resolve_action_frame_range(active_action, scene)
-    fps = int(scene.render.fps) if scene.render.fps > 0 else DEFAULT_S5_FPS
-    root_id = resolve_export_root_id(armature_object, filepath)
-
-    return build_animation_export_json(
-        arm_ob=armature_object,
-        root_id=root_id,
-        action=active_action,
-        frame_start=frame_start,
-        frame_end=frame_end,
-        fps=fps,
-        source_name=os.path.basename(filepath),
-    )
-
-
 def _ensure_filepath_extension(filepath, extension):
     root, _old_ext = os.path.splitext(filepath)
     return root + extension if root else filepath + extension
 
 
-class BuildingAnmExportOperator(Operator, ExportHelper):
-    bl_idname = "export_anim.building_anm"
-    bl_label = "Novator-Export-Buidling-Anm (.anm/.json)"
+class UnitAnmExportOperator(Operator, ExportHelper):
+    bl_idname = "export_anim.unit_anm"
+    bl_label = "Novator-Export-Unit-Anm (.anm/.json)"
     filename_ext = ".anm"
     filter_glob: StringProperty(default="*.anm;*.json", options={"HIDDEN"})
     file_format: EnumProperty(
@@ -138,7 +97,7 @@ class BuildingAnmExportOperator(Operator, ExportHelper):
         export_path = _ensure_filepath_extension(self.filepath, ".anm" if self.file_format == "ANM" else ".json")
         try:
             if self.export_scope == "ACTIVE":
-                payload = _build_animation_payload(context, export_path)
+                payload = build_active_unit_animation_payload(context, export_path)
                 if self.file_format == "ANM":
                     convert_json_to_anm_external(payload, export_path)
                 else:
@@ -159,7 +118,7 @@ class BuildingAnmExportOperator(Operator, ExportHelper):
                     action_path = os.path.join(export_directory, export_name + extension)
                     original_action, original_track_mutes = isolate_action_for_export(armature_object, action)
                     try:
-                        payload = _build_animation_payload(context, action_path, action=action)
+                        payload = build_unit_animation_payload_for_action(context, action_path, action)
                     finally:
                         restore_action_after_export(armature_object, original_action, original_track_mutes)
 

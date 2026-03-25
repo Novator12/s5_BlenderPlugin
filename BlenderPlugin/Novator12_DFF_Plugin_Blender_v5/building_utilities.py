@@ -1707,8 +1707,6 @@ def estimate_fps_from_tracks(tracks) -> int:
 
 
 def determine_fps(source_format: str, tracks) -> int:
-    if source_format == "hierarchical":
-        return DEFAULT_S5_FPS
     return estimate_fps_from_tracks(tracks)
 
 
@@ -1952,6 +1950,130 @@ def clear_existing_action(arm_ob: bpy.types.Object):
         arm_ob.animation_data.action = None
         return old_action
     return None
+
+
+def action_name_from_source(source_name: str) -> str:
+    base_name = os.path.splitext(os.path.basename(source_name or "Animation"))[0]
+    return base_name or "Animation"
+
+
+def ensure_action_export_name(action: bpy.types.Action, fallback_name: str | None = None) -> str:
+    if action is None:
+        return fallback_name or "Animation"
+
+    export_name = action.get("s5_export_name")
+    if isinstance(export_name, str) and export_name.strip():
+        return export_name.strip()
+
+    export_name = action_name_from_source(fallback_name or action.name)
+    action["s5_export_name"] = export_name
+    return export_name
+
+
+def build_unique_action_name(base_name: str) -> str:
+    candidate = base_name or "Animation"
+    if bpy.data.actions.get(candidate) is None:
+        return candidate
+
+    suffix = 1
+    while bpy.data.actions.get(f"{candidate}.{suffix:03d}") is not None:
+        suffix += 1
+    return f"{candidate}.{suffix:03d}"
+
+
+def ensure_action_stashed_in_muted_nla(arm_ob: bpy.types.Object, action: bpy.types.Action, clear_active: bool = False):
+    arm_ob.animation_data_create()
+    animation_data = arm_ob.animation_data
+    if action is None:
+        return None
+
+    for track in animation_data.nla_tracks:
+        for strip in track.strips:
+            if strip.action == action:
+                track.mute = True
+                if clear_active and animation_data.action == action:
+                    animation_data.action = None
+                return track
+
+    track = animation_data.nla_tracks.new()
+    track.name = action.name
+    frame_start = int(round(action.frame_range[0]))
+    strip = track.strips.new(action.name, frame_start, action)
+    strip.action_frame_start = action.frame_range[0]
+    strip.action_frame_end = action.frame_range[1]
+    track.mute = True
+    if clear_active and animation_data.action == action:
+        animation_data.action = None
+    return track
+
+
+def stash_active_action_in_muted_nla(arm_ob: bpy.types.Object):
+    arm_ob.animation_data_create()
+    animation_data = arm_ob.animation_data
+    active_action = animation_data.action
+    if active_action is None:
+        return None
+
+    return ensure_action_stashed_in_muted_nla(arm_ob, active_action, clear_active=True)
+
+
+def create_import_action(arm_ob: bpy.types.Object, source_name: str) -> bpy.types.Action:
+    arm_ob.animation_data_create()
+    if arm_ob.animation_data.action is not None:
+        stash_active_action_in_muted_nla(arm_ob)
+
+    action_base_name = action_name_from_source(source_name)
+    action_name = build_unique_action_name(action_base_name)
+    action = bpy.data.actions.new(action_name)
+    action.use_fake_user = True
+    action["s5_export_name"] = action_base_name
+    arm_ob.animation_data.action = action
+    return action
+
+
+def collect_armature_actions(arm_ob: bpy.types.Object) -> list[bpy.types.Action]:
+    actions = []
+    seen = set()
+    animation_data = getattr(arm_ob, "animation_data", None)
+    if animation_data is None:
+        return actions
+
+    if animation_data.action is not None:
+        actions.append(animation_data.action)
+        seen.add(animation_data.action.name_full)
+
+    for track in animation_data.nla_tracks:
+        for strip in track.strips:
+            action = strip.action
+            if action is None or action.name_full in seen:
+                continue
+            actions.append(action)
+            seen.add(action.name_full)
+
+    return actions
+
+
+def isolate_action_for_export(arm_ob: bpy.types.Object, action: bpy.types.Action):
+    arm_ob.animation_data_create()
+    animation_data = arm_ob.animation_data
+    original_action = animation_data.action
+    original_track_mutes = [track.mute for track in animation_data.nla_tracks]
+
+    for track in animation_data.nla_tracks:
+        track.mute = True
+
+    animation_data.action = action
+    return original_action, original_track_mutes
+
+
+def restore_action_after_export(arm_ob: bpy.types.Object, original_action, original_track_mutes):
+    animation_data = getattr(arm_ob, "animation_data", None)
+    if animation_data is None:
+        return
+
+    animation_data.action = original_action
+    for track, mute_state in zip(animation_data.nla_tracks, original_track_mutes):
+        track.mute = mute_state
 
 
 def store_imported_animation_metadata(arm_ob: bpy.types.Object, action: bpy.types.Action, js: dict):
@@ -2235,6 +2357,7 @@ def apply_tracks_to_armature(
     duration: float,
     tracks: list[list[dict]],
     source_format: str,
+    action_source_name: str | None = None,
 ):
     root_bone = find_bone_by_node_id(arm_ob, root_id)
     if not root_bone:
@@ -2268,12 +2391,7 @@ def apply_tracks_to_armature(
     scene.frame_start = 0
     scene.frame_end = max(0, int(round(duration * fps)))
 
-    arm_ob.animation_data_create()
-    clear_existing_action(arm_ob)
-
-    action_name = f"SkinAction_{root_id}"
-    action = bpy.data.actions.new(action_name)
-    arm_ob.animation_data.action = action
+    action = create_import_action(arm_ob, action_source_name or f"SkinAction_{root_id}")
 
     bpy.context.view_layer.objects.active = arm_ob
     arm_ob.select_set(True)
@@ -2305,7 +2423,15 @@ def apply_tracks_to_armature(
             posebone_set_from_local_matrix(arm_ob, pb, local_anim_mtx)
             insert_posebone_keys(pb, frame)
 
-    scene.frame_set(scene.frame_start)
+    try:
+        action_frame_end = max(0, int(round(action.frame_range[1] - action.frame_range[0])))
+    except Exception:
+        action_frame_end = max(0, int(round(duration * fps)))
+
+    scene.frame_start = 0
+    scene.frame_end = action_frame_end
+    scene.frame_set(0)
+    bpy.context.view_layer.update()
     print(
         f"[INFO] Animation importiert. "
         f"format={source_format}, root_id={root_id}, fps={fps}, tracks={len(tracks)}, used={n}"
@@ -2316,7 +2442,7 @@ def apply_tracks_to_armature(
 def apply_animation_json_to_armature(json_path: str, arm_ob: bpy.types.Object, source_name_for_root: str):
     duration, tracks, source_format = parse_animation_json(json_path)
     root_id = root_id_from_filename(source_name_for_root)
-    action = apply_tracks_to_armature(arm_ob, root_id, duration, tracks, source_format)
+    action = apply_tracks_to_armature(arm_ob, root_id, duration, tracks, source_format, source_name_for_root)
     with open(json_path, "r", encoding="utf-8") as f:
         js = json.load(f)
     store_imported_animation_metadata(arm_ob, action, js)
@@ -2326,7 +2452,7 @@ def apply_animation_json_to_armature(json_path: str, arm_ob: bpy.types.Object, s
 def apply_animation_data_to_armature(js: dict, arm_ob: bpy.types.Object, source_name_for_root: str):
     duration, tracks, source_format = parse_animation_data(js)
     root_id = root_id_from_filename(source_name_for_root)
-    action = apply_tracks_to_armature(arm_ob, root_id, duration, tracks, source_format)
+    action = apply_tracks_to_armature(arm_ob, root_id, duration, tracks, source_format, source_name_for_root)
     store_imported_animation_metadata(arm_ob, action, js)
     return action
 

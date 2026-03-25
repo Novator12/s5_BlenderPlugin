@@ -13,6 +13,7 @@ bl_info = {
 }
 
 import bpy
+from bpy.app.handlers import persistent
 
 # Novator Adds:
 # UserDataPlg Menü und Im- & Export + UI Panel Stuff
@@ -28,6 +29,9 @@ from mathutils import Vector
 # Zusatzskripte
 from .building_anm_export import BuildingAnmExportOperator
 from .building_anm_import import BuildingAnmImportOperator
+from .unit_anm_export import UnitAnmExportOperator
+from .unit_anm_import import UnitAnmImportOperator
+from .building_utilities import ensure_action_stashed_in_muted_nla
 from .building_model_export import (
     BuildingExportOperator,
     write_building_model,
@@ -46,6 +50,8 @@ from .unit_model_import import (
 # Gobals
 AtomicMaterialFX_Data = {}
 ParticleDataList = {}
+_LAST_ACTION_SYNC_KEY = None
+_LAST_ACTION_BY_OBJECT = {}
 
 
 # -------------------------------------------------------Export Functions------------------------------------------
@@ -68,6 +74,70 @@ def export_unit_model_state(path, context):
     from .unit_utilities import write_unit_model
 
     write_unit_model(path, context)
+
+
+def _get_active_armature_action(context):
+    active_object = getattr(context, "object", None)
+    if active_object is None or active_object.type != "ARMATURE":
+        return None, None
+
+    animation_data = getattr(active_object, "animation_data", None)
+    if animation_data is None:
+        return active_object, None
+
+    return active_object, animation_data.action
+
+
+def _sync_scene_range_to_action(scene, action):
+    if action is None:
+        return
+
+    try:
+        action_start = float(action.frame_range[0])
+        action_end = float(action.frame_range[1])
+    except Exception:
+        return
+
+    frame_length = max(0, int(round(action_end - action_start)))
+    scene.frame_start = 0
+    scene.frame_end = frame_length
+    scene.frame_set(0)
+    bpy.context.view_layer.update()
+
+
+@persistent
+def _sync_timeline_to_selected_action(_scene=None):
+    global _LAST_ACTION_SYNC_KEY, _LAST_ACTION_BY_OBJECT
+
+    context = bpy.context
+    scene = getattr(context, "scene", None)
+    if scene is None:
+        return
+
+    armature_object, action = _get_active_armature_action(context)
+    action_name = None if action is None else action.name_full
+    object_name = None if armature_object is None else armature_object.name_full
+    action_key = (object_name, action_name)
+
+    if action_key == _LAST_ACTION_SYNC_KEY:
+        return
+
+    if armature_object is not None:
+        previous_action = _LAST_ACTION_BY_OBJECT.get(object_name)
+        if previous_action is not None and previous_action != action:
+            try:
+                ensure_action_stashed_in_muted_nla(armature_object, previous_action, clear_active=False)
+            except Exception:
+                pass
+
+    _LAST_ACTION_SYNC_KEY = action_key
+    if object_name is not None:
+        if action is None:
+            _LAST_ACTION_BY_OBJECT.pop(object_name, None)
+        else:
+            _LAST_ACTION_BY_OBJECT[object_name] = action
+    if action is not None:
+        _sync_scene_range_to_action(scene, action)
 
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -506,6 +576,8 @@ class SCENE_OT_clear_all(bpy.types.Operator):
     bl_description = "Löscht alle Objekte + unbenutzte Datenblöcke aus der Szene"
 
     def execute(self, context):
+        global _LAST_ACTION_SYNC_KEY, _LAST_ACTION_BY_OBJECT
+
         scene = context.scene
 
         # Tool-Listen leeren
@@ -554,7 +626,21 @@ class SCENE_OT_clear_all(bpy.types.Operator):
             if w.users == 0:
                 bpy.data.worlds.remove(w)
 
-        # 4) Orphans purgen (mehrfach, weil Blender nicht immer alles in einem Durchlauf entfernt)
+        # 4) Alle Actions explizit entfernen, auch solche mit Fake User.
+        for action in list(bpy.data.actions):
+            try:
+                action.use_fake_user = False
+            except Exception:
+                pass
+            try:
+                bpy.data.actions.remove(action)
+            except Exception:
+                pass
+
+        _LAST_ACTION_SYNC_KEY = None
+        _LAST_ACTION_BY_OBJECT = {}
+
+        # 5) Orphans purgen (mehrfach, weil Blender nicht immer alles in einem Durchlauf entfernt)
         for _ in range(5):
             # In Blender 5 gibt’s bpy.data.orphans_purge
             res = bpy.data.orphans_purge(do_local_ids=True, do_linked_ids=True, do_recursive=True)
@@ -588,11 +674,13 @@ class SCENE_PT_tools(Panel):
 CLASSES = (
     # Import/Export Operatoren
     BuildingImportOperator,
-    UnitImportOperator,
-    BuildingExportOperator,
-    UnitExportOperator,
     BuildingAnmImportOperator,
+    BuildingExportOperator,
     BuildingAnmExportOperator,
+    UnitImportOperator,
+    UnitAnmImportOperator,
+    UnitExportOperator,
+    UnitAnmExportOperator,
 
     # Deine UI/Property Klassen (wie bei dir vorhanden)
     BoneMappingItem,
@@ -635,6 +723,9 @@ def draw_import_unit_menu_entry(self, context):
 def draw_import_anm_menu_entry(self, context):
     self.layout.operator(BuildingAnmImportOperator.bl_idname, text=BuildingAnmImportOperator.bl_label)
 
+def draw_import_unit_anm_menu_entry(self, context):
+    self.layout.operator(UnitAnmImportOperator.bl_idname, text=UnitAnmImportOperator.bl_label)
+
 def draw_export_building_menu_entry(self, context):
     self.layout.operator(BuildingExportOperator.bl_idname, text=BuildingExportOperator.bl_label)
 
@@ -644,6 +735,9 @@ def draw_export_unit_menu_entry(self, context):
 def draw_export_anm_menu_entry(self, context):
     self.layout.operator(BuildingAnmExportOperator.bl_idname, text=BuildingAnmExportOperator.bl_label)
 
+def draw_export_unit_anm_menu_entry(self, context):
+    self.layout.operator(UnitAnmExportOperator.bl_idname, text=UnitAnmExportOperator.bl_label)
+
 
 def register_file_menu_entries():
     imp = bpy.types.TOPBAR_MT_file_import
@@ -651,8 +745,9 @@ def register_file_menu_entries():
 
     for fn in (
         draw_import_building_menu_entry,
-        draw_import_unit_menu_entry,
         draw_import_anm_menu_entry,
+        draw_import_unit_menu_entry,
+        draw_import_unit_anm_menu_entry,
     ):
         try: imp.remove(fn)
         except Exception: pass
@@ -660,8 +755,9 @@ def register_file_menu_entries():
 
     for fn in (
         draw_export_building_menu_entry,
-        draw_export_unit_menu_entry,
         draw_export_anm_menu_entry,
+        draw_export_unit_menu_entry,
+        draw_export_unit_anm_menu_entry,
     ):
         try: exp.remove(fn)
         except Exception: pass
@@ -673,22 +769,26 @@ def unregister_file_menu_entries():
 
     for fn in (
         draw_import_building_menu_entry,
-        draw_import_unit_menu_entry,
         draw_import_anm_menu_entry,
+        draw_import_unit_menu_entry,
+        draw_import_unit_anm_menu_entry,
     ):
         try: imp.remove(fn)
         except Exception: pass
 
     for fn in (
         draw_export_building_menu_entry,
-        draw_export_unit_menu_entry,
         draw_export_anm_menu_entry,
+        draw_export_unit_menu_entry,
+        draw_export_unit_anm_menu_entry,
     ):
         try: exp.remove(fn)
         except Exception: pass
 
 
 def register():
+    global _LAST_ACTION_SYNC_KEY, _LAST_ACTION_BY_OBJECT
+
     for cls in CLASSES:
         bpy.utils.register_class(cls)
 
@@ -703,9 +803,20 @@ def register():
     bpy.types.Scene.geometry_tool_index = IntProperty(default=0)
 
     register_file_menu_entries()
+    _LAST_ACTION_SYNC_KEY = None
+    _LAST_ACTION_BY_OBJECT = {}
+    if _sync_timeline_to_selected_action not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(_sync_timeline_to_selected_action)
 
 def unregister():
+    global _LAST_ACTION_SYNC_KEY, _LAST_ACTION_BY_OBJECT
+
     unregister_file_menu_entries()
+
+    if _sync_timeline_to_selected_action in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(_sync_timeline_to_selected_action)
+    _LAST_ACTION_SYNC_KEY = None
+    _LAST_ACTION_BY_OBJECT = {}
 
     # Scene Properties entfernen
     for attr in ("bone_items","bone_active_index","particle_effects","particle_effects_index","geometry_tool_items","geometry_tool_index"):

@@ -4,20 +4,48 @@ import json
 import os
 
 from collections import OrderedDict
+import mathutils as mu
 from mathutils import Matrix
 
 from .building_utilities import (
+    DEFAULT_S5_FPS,
     _build_geometry_format,
     _collect_texture_coordinates,
     accumulate_rest_matrix,
     bone_name_to_node_id,
+    build_converter_track_for_bone,
+    build_matrix_from_s5_key,
+    collect_armature_actions,
+    collect_keyed_frames_for_bone,
+    convert_anm_to_json_external,
+    convert_json_to_anm_external,
+    create_import_action,
+    determine_fps,
     edit_bone_to_matrix,
+    ensure_action_export_name,
+    ensure_armature_active,
+    find_bone_by_node_id,
     frame_dict_to_matrix,
+    get_posebone_local_anim_matrix,
     get_converter_exe_location,
+    isolate_action_for_export,
+    insert_posebone_keys,
     link_object_in_active_collection,
     load_building_model_payload,
     matrix_to_bone_axis_roll,
+    parse_animation_data,
+    parse_converter_nodes,
+    posebone_set_from_local_matrix,
+    quat_to_s5_json,
+    resolve_start_prev_keyframe_value,
+    restore_action_after_export,
+    root_id_from_filename,
     save_building_model_payload,
+    s5_quat_to_blender,
+    s5_time_to_frame,
+    s5_vec_to_blender,
+    store_imported_animation_metadata,
+    vec_to_s5_json,
 )
 
 
@@ -60,7 +88,7 @@ def _accumulate_world_matrix(frames, hierarchy, start_index):
 
 
 def _format_bone_name(frame_index, node_id):
-    base_name = f"frame_{frame_index:0{BONE_NAME_PADDING}d}"
+    base_name = "frame_{:0{width}d}".format(frame_index, width=BONE_NAME_PADDING)
     return f"{base_name}_{node_id}" if node_id is not None else base_name
 
 
@@ -1032,3 +1060,414 @@ def write_unit_model(path, context):
     converter_path = get_converter_exe_location()
     payload = build_unit_export_json(context)
     save_building_model_payload(path, payload, converter_path)
+
+
+def _load_unit_root_hanim_payload(arm_ob):
+    try:
+        nodes = json.loads(arm_ob.get("s5_root_hanim_nodes", "null"))
+    except Exception:
+        nodes = None
+
+    try:
+        parents = json.loads(arm_ob.get("s5_root_hanim_parents", "null"))
+    except Exception:
+        parents = None
+
+    return nodes, parents
+
+
+def _build_matrix_from_compressed_key(key: dict, offset: dict, scalar: dict) -> mu.Matrix:
+    packed_translation = key.get("T", {})
+    translation = mu.Vector((
+        float(offset.get("x", 0.0)) + float(scalar.get("x", 0.0)) * float(packed_translation.get("x", 0.0)),
+        float(offset.get("y", 0.0)) + float(scalar.get("y", 0.0)) * float(packed_translation.get("y", 0.0)),
+        float(offset.get("z", 0.0)) + float(scalar.get("z", 0.0)) * float(packed_translation.get("z", 0.0)),
+    ))
+    quaternion = s5_quat_to_blender(key["Q"])
+    matrix = quaternion.to_matrix().to_4x4()
+    matrix.translation = translation
+    return matrix
+
+
+def parse_compressed_anim_tracks(js: dict) -> tuple[float, list[list[dict]]]:
+    compressed = js.get("CompressedAnim")
+    if not compressed:
+        raise RuntimeError("JSON enthält kein 'CompressedAnim'.")
+
+    duration = float(compressed.get("Duration", compressed.get("duration", 0.0)))
+    keyframes = compressed.get("KeyFrames", [])
+    if not keyframes:
+        raise RuntimeError("CompressedAnim enthält keine KeyFrames.")
+
+    offset = compressed.get("Offset") or {}
+    scalar = compressed.get("Scalar") or {}
+    starts = []
+    by_prev = {}
+
+    for idx, key in enumerate(keyframes):
+        prev = int(key.get("PrevKeyFrame", -1))
+        time_val = float(key.get("Time", 0.0))
+        if time_val == 0.0 and prev < 0:
+            starts.append(idx)
+        by_prev.setdefault(prev, []).append(idx)
+
+    if not starts:
+        raise RuntimeError("Keine Start-KeyFrames in CompressedAnim gefunden.")
+
+    for prev_idx in by_prev:
+        by_prev[prev_idx].sort(key=lambda item: (float(keyframes[item]["Time"]), item))
+
+    tracks = []
+    for start_idx in starts:
+        chain = []
+        current = start_idx
+        visited = set()
+
+        while current not in visited:
+            visited.add(current)
+            key = keyframes[current]
+            chain.append({
+                "time": float(key["Time"]),
+                "matrix": _build_matrix_from_compressed_key(key, offset, scalar),
+                "raw": key,
+                "index": current,
+            })
+
+            next_candidates = by_prev.get(current, [])
+            if not next_candidates:
+                break
+
+            current = next_candidates[0]
+
+        tracks.append(chain)
+
+    tracks.sort(key=lambda track: track[0]["index"])
+    return duration, tracks
+
+
+def parse_unit_animation_data(js: dict) -> tuple[float, list[list[dict]], str]:
+    if "CompressedAnim" in js:
+        duration, tracks = parse_compressed_anim_tracks(js)
+        return duration, tracks, "compressed"
+
+    duration, tracks, source_format = parse_animation_data(js)
+    return duration, tracks, source_format
+
+
+def parse_unit_animation_json(json_path: str) -> tuple[float, list[list[dict]], str]:
+    with open(json_path, "r", encoding="utf-8") as handle:
+        js = json.load(handle)
+    return parse_unit_animation_data(js)
+
+
+def resolve_unit_animation_root_id(arm_ob: bpy.types.Object, filepath: str | None = None) -> int:
+    if filepath:
+        try:
+            return root_id_from_filename(filepath)
+        except Exception:
+            pass
+
+    root_hanim_nodes, root_hanim_parents = _load_unit_root_hanim_payload(arm_ob)
+    if root_hanim_nodes:
+        if root_hanim_parents and len(root_hanim_parents) == len(root_hanim_nodes):
+            for node_entry, parent_index in zip(root_hanim_nodes, root_hanim_parents):
+                if int(parent_index) == -1 and node_entry.get("nodeID") is not None:
+                    return int(node_entry["nodeID"])
+
+        for node_entry in root_hanim_nodes:
+            if int(node_entry.get("nodeID", -1)) == 2000:
+                return 2000
+
+        ordered_nodes = sorted(
+            (entry for entry in root_hanim_nodes if entry.get("nodeID") is not None),
+            key=lambda entry: int(entry.get("nodeIndex", 10 ** 9)),
+        )
+        if ordered_nodes:
+            return int(ordered_nodes[0]["nodeID"])
+
+    root_bone = find_bone_by_node_id(arm_ob, 2000)
+    if root_bone is not None:
+        return 2000
+
+    for bone_name in determine_unit_bone_names_sorted(arm_ob):
+        node_id = bone_name_to_node_id(bone_name)
+        if node_id != -1:
+            return int(node_id)
+
+    raise RuntimeError("Keine Unit-Animations-Root-ID im Rig gefunden.")
+
+
+def collect_unit_animation_bones(arm_ob: bpy.types.Object, root_id: int | None = None) -> list:
+    root_hanim_nodes, root_hanim_parents = _load_unit_root_hanim_payload(arm_ob)
+    if root_hanim_nodes:
+        ordered_nodes = sorted(
+            root_hanim_nodes,
+            key=lambda entry: int(entry.get("nodeIndex", 10 ** 9)),
+        )
+
+        allowed_node_indices = None
+        if root_id is not None and root_hanim_parents and len(root_hanim_parents) == len(root_hanim_nodes):
+            root_index = None
+            for node_entry in ordered_nodes:
+                if int(node_entry.get("nodeID", -1)) == int(root_id):
+                    root_index = int(node_entry.get("nodeIndex", -1))
+                    break
+
+            if root_index is not None and root_index >= 0:
+                children_by_parent = {}
+                for node_entry, parent_index in zip(ordered_nodes, root_hanim_parents):
+                    node_index = int(node_entry.get("nodeIndex", -1))
+                    if node_index < 0:
+                        continue
+                    children_by_parent.setdefault(int(parent_index), []).append(node_index)
+
+                allowed_node_indices = set()
+                pending = [root_index]
+                while pending:
+                    current = pending.pop()
+                    if current in allowed_node_indices:
+                        continue
+                    allowed_node_indices.add(current)
+                    pending.extend(children_by_parent.get(current, []))
+
+        animation_bones = []
+        for node_entry in ordered_nodes:
+            node_index = int(node_entry.get("nodeIndex", -1))
+            if allowed_node_indices is not None and node_index not in allowed_node_indices:
+                continue
+
+            node_id = node_entry.get("nodeID")
+            if node_id is None:
+                continue
+
+            bone = find_bone_by_node_id(arm_ob, int(node_id))
+            if bone is not None:
+                animation_bones.append(bone)
+
+        if animation_bones:
+            return animation_bones
+
+    animation_bones = []
+    for bone_name in determine_unit_bone_names_sorted(arm_ob):
+        node_id = bone_name_to_node_id(bone_name)
+        if node_id == -1:
+            continue
+
+        bone = arm_ob.data.bones.get(bone_name)
+        if bone is not None:
+            animation_bones.append(bone)
+
+    return animation_bones
+
+
+def build_unit_animation_export_json(
+    arm_ob: bpy.types.Object,
+    root_id: int,
+    action: bpy.types.Action,
+    frame_start: int,
+    frame_end: int,
+    fps: int,
+    source_name: str,
+) -> dict:
+    animation_bones = collect_unit_animation_bones(arm_ob, root_id)
+    if not animation_bones:
+        raise RuntimeError(f"Keine animierbaren Unit-Bones für Root {root_id} gefunden.")
+
+    duration = max(0.0, float(frame_end - frame_start) / fps)
+    track_entries = []
+
+    for bone in animation_bones:
+        frames = collect_keyed_frames_for_bone(action, bone.name, frame_start, frame_end)
+        track = build_converter_track_for_bone(
+            scene=bpy.context.scene,
+            arm_ob=arm_ob,
+            bone=bone,
+            frames=frames,
+            fps=fps,
+            base_frame=frame_start,
+        )
+
+        entries = []
+        for key in track:
+            entries.append({
+                "Time": float(key["time"]),
+                "Q": quat_to_s5_json(mu.Quaternion((
+                    key["quaternion"]["w"],
+                    key["quaternion"]["x"],
+                    key["quaternion"]["y"],
+                    key["quaternion"]["z"],
+                ))),
+                "T": vec_to_s5_json(mu.Vector((
+                    key["position"]["x"],
+                    key["position"]["y"],
+                    key["position"]["z"],
+                ))),
+            })
+        track_entries.append(entries)
+
+    keyframes = []
+    last_indices = []
+    start_prev_keyframe = resolve_start_prev_keyframe_value(
+        arm_ob=arm_ob,
+        action=action,
+        source_name=source_name,
+        root_id=root_id,
+        bone_count=len(track_entries),
+    )
+
+    for entries in track_entries:
+        if not entries:
+            continue
+        start_entry = dict(entries[0])
+        start_entry["PrevKeyFrame"] = start_prev_keyframe
+        keyframes.append(start_entry)
+        last_indices.append(len(keyframes) - 1)
+
+    for track_idx, entries in enumerate(track_entries):
+        if not entries:
+            continue
+        prev_key_index = last_indices[track_idx]
+        for entry in entries[1:]:
+            out_entry = dict(entry)
+            out_entry["PrevKeyFrame"] = prev_key_index
+            keyframes.append(out_entry)
+            prev_key_index = len(keyframes) - 1
+
+    return {
+        "$schema": "https://github.com/mcb5637/S5Converter/raw/refs/heads/master/schema.json",
+        "HierarchicalAnim": {
+            "InterpolatorTypeId": "HierarchicalAnim",
+            "Flags": 0,
+            "Duration": duration,
+            "KeyFrames": keyframes,
+        },
+        "BuildNum": 10,
+        "VersionNum": 225282,
+        "ConvertRadians": True,
+    }
+
+
+def apply_unit_tracks_to_armature(
+    arm_ob: bpy.types.Object,
+    root_id: int,
+    duration: float,
+    tracks: list[list[dict]],
+    source_format: str,
+    action_source_name: str | None = None,
+):
+    animation_bones = collect_unit_animation_bones(arm_ob, root_id)
+    if not animation_bones:
+        raise RuntimeError(f"Keine animierbaren Unit-Bones für Root {root_id} gefunden.")
+
+    used_track_count = min(len(tracks), len(animation_bones))
+    if used_track_count == 0:
+        raise RuntimeError("Keine passenden Tracks/Bones für die Unit-Animation gefunden.")
+
+    if len(tracks) != len(animation_bones):
+        print(
+            f"[WARN] Unit-Trackcount != Bonecount: "
+            f"tracks={len(tracks)} bones={len(animation_bones)} -> benutze n={used_track_count}"
+        )
+
+    fps = determine_fps(source_format, tracks)
+    scene = bpy.context.scene
+    scene.render.fps = fps if fps > 0 else DEFAULT_S5_FPS
+    scene.frame_start = 0
+    scene.frame_end = max(0, int(round(duration * scene.render.fps)))
+
+    action = create_import_action(arm_ob, action_source_name or f"UnitSkinAction_{root_id}")
+
+    bpy.context.view_layer.objects.active = arm_ob
+    arm_ob.select_set(True)
+    if bpy.ops.object.mode_set.poll():
+        bpy.ops.object.mode_set(mode="POSE")
+
+    for track_index in range(used_track_count):
+        bone = animation_bones[track_index]
+        pose_bone = arm_ob.pose.bones.get(bone.name)
+        if pose_bone is None:
+            print(f"[WARN] PoseBone nicht gefunden: {bone.name}")
+            continue
+
+        pose_bone.rotation_mode = "QUATERNION"
+        for key in tracks[track_index]:
+            frame = s5_time_to_frame(float(key["time"]), scene.render.fps)
+            scene.frame_set(frame)
+            posebone_set_from_local_matrix(arm_ob, pose_bone, key["matrix"])
+            insert_posebone_keys(pose_bone, frame)
+
+    try:
+        action_frame_end = max(0, int(round(action.frame_range[1] - action.frame_range[0])))
+    except Exception:
+        action_frame_end = max(0, int(round(duration * scene.render.fps)))
+
+    scene.frame_start = 0
+    scene.frame_end = action_frame_end
+    scene.frame_set(0)
+    bpy.context.view_layer.update()
+    print(
+        f"[INFO] Unit-Animation importiert. "
+        f"format={source_format}, root_id={root_id}, fps={scene.render.fps}, "
+        f"tracks={len(tracks)}, used={used_track_count}"
+    )
+    return action
+
+
+def apply_unit_animation_json_to_armature(json_path: str, arm_ob: bpy.types.Object, source_name_for_root: str):
+    duration, tracks, source_format = parse_unit_animation_json(json_path)
+    root_id = resolve_unit_animation_root_id(arm_ob, source_name_for_root)
+    action = apply_unit_tracks_to_armature(arm_ob, root_id, duration, tracks, source_format, source_name_for_root)
+    with open(json_path, "r", encoding="utf-8") as handle:
+        js = json.load(handle)
+    store_imported_animation_metadata(arm_ob, action, js)
+    return action
+
+
+def apply_unit_animation_data_to_armature(js: dict, arm_ob: bpy.types.Object, source_name_for_root: str):
+    duration, tracks, source_format = parse_unit_animation_data(js)
+    root_id = resolve_unit_animation_root_id(arm_ob, source_name_for_root)
+    action = apply_unit_tracks_to_armature(arm_ob, root_id, duration, tracks, source_format, source_name_for_root)
+    store_imported_animation_metadata(arm_ob, action, js)
+    return action
+
+
+def build_active_unit_animation_payload(context, filepath):
+    armature_object = ensure_armature_active()
+    if not armature_object.animation_data or not armature_object.animation_data.action:
+        raise RuntimeError("Keine aktive Action auf der Armature gefunden.")
+
+    action = armature_object.animation_data.action
+    scene = context.scene
+    frame_start = int(scene.frame_start)
+    frame_end = int(scene.frame_end)
+    fps = int(scene.render.fps) if scene.render.fps > 0 else DEFAULT_S5_FPS
+    root_id = resolve_unit_animation_root_id(armature_object, filepath)
+
+    return build_unit_animation_export_json(
+        arm_ob=armature_object,
+        root_id=root_id,
+        action=action,
+        frame_start=frame_start,
+        frame_end=frame_end,
+        fps=fps,
+        source_name=os.path.basename(filepath),
+    )
+
+
+def build_unit_animation_payload_for_action(context, filepath, action):
+    armature_object = ensure_armature_active()
+    scene = context.scene
+    frame_start = int(scene.frame_start)
+    frame_end = int(scene.frame_end)
+    fps = int(scene.render.fps) if scene.render.fps > 0 else DEFAULT_S5_FPS
+    root_id = resolve_unit_animation_root_id(armature_object, filepath)
+
+    return build_unit_animation_export_json(
+        arm_ob=armature_object,
+        root_id=root_id,
+        action=action,
+        frame_start=frame_start,
+        frame_end=frame_end,
+        fps=fps,
+        source_name=os.path.basename(filepath),
+    )
