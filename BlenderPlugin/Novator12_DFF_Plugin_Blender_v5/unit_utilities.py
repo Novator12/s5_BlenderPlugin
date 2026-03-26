@@ -22,11 +22,13 @@ from .building_utilities import (
     create_import_action,
     determine_fps,
     edit_bone_to_matrix,
+    ensure_action_anim_fps,
     ensure_action_export_name,
     ensure_armature_active,
     find_bone_by_node_id,
     frame_dict_to_matrix,
     get_posebone_local_anim_matrix,
+    get_action_anim_fps,
     get_converter_exe_location,
     isolate_action_for_export,
     insert_posebone_keys,
@@ -41,6 +43,9 @@ from .building_utilities import (
     restore_action_after_export,
     root_id_from_filename,
     save_building_model_payload,
+    set_action_anim_format,
+    set_action_anim_fps,
+    set_scene_frame,
     s5_quat_to_blender,
     s5_time_to_frame,
     s5_vec_to_blender,
@@ -1264,8 +1269,8 @@ def build_unit_animation_export_json(
     arm_ob: bpy.types.Object,
     root_id: int,
     action: bpy.types.Action,
-    frame_start: int,
-    frame_end: int,
+    frame_start: float,
+    frame_end: float,
     fps: int,
     source_name: str,
 ) -> dict:
@@ -1273,18 +1278,29 @@ def build_unit_animation_export_json(
     if not animation_bones:
         raise RuntimeError(f"Keine animierbaren Unit-Bones für Root {root_id} gefunden.")
 
-    duration = max(0.0, float(frame_end - frame_start) / fps)
+    track_frames = []
+    for bone in animation_bones:
+        track_frames.append(collect_keyed_frames_for_bone(action, bone.name, frame_start, frame_end))
+
+    non_empty_frames = [frames for frames in track_frames if frames]
+    if non_empty_frames:
+        export_frame_start = min(min(frames) for frames in non_empty_frames)
+        export_frame_end = max(max(frames) for frames in non_empty_frames)
+    else:
+        export_frame_start = frame_start
+        export_frame_end = frame_end
+
+    duration = max(0.0, float(export_frame_end - export_frame_start) / fps)
     track_entries = []
 
-    for bone in animation_bones:
-        frames = collect_keyed_frames_for_bone(action, bone.name, frame_start, frame_end)
+    for bone, frames in zip(animation_bones, track_frames):
         track = build_converter_track_for_bone(
             scene=bpy.context.scene,
             arm_ob=arm_ob,
             bone=bone,
             frames=frames,
             fps=fps,
-            base_frame=frame_start,
+            base_frame=export_frame_start,
         )
 
         entries = []
@@ -1372,10 +1388,13 @@ def apply_unit_tracks_to_armature(
     fps = determine_fps(source_format, tracks)
     scene = bpy.context.scene
     scene.render.fps = fps if fps > 0 else DEFAULT_S5_FPS
+    scene.render.fps_base = 1.0
     scene.frame_start = 0
     scene.frame_end = max(0, int(round(duration * scene.render.fps)))
 
     action = create_import_action(arm_ob, action_source_name or f"UnitSkinAction_{root_id}")
+    set_action_anim_fps(action, scene.render.fps)
+    set_action_anim_format(action, source_format)
 
     bpy.context.view_layer.objects.active = arm_ob
     arm_ob.select_set(True)
@@ -1392,7 +1411,7 @@ def apply_unit_tracks_to_armature(
         pose_bone.rotation_mode = "QUATERNION"
         for key in tracks[track_index]:
             frame = s5_time_to_frame(float(key["time"]), scene.render.fps)
-            scene.frame_set(frame)
+            set_scene_frame(scene, frame)
             posebone_set_from_local_matrix(arm_ob, pose_bone, key["matrix"])
             insert_posebone_keys(pose_bone, frame)
 
@@ -1405,6 +1424,8 @@ def apply_unit_tracks_to_armature(
     scene.frame_end = action_frame_end
     scene.frame_set(0)
     bpy.context.view_layer.update()
+    if bpy.ops.object.mode_set.poll():
+        bpy.ops.object.mode_set(mode="OBJECT")
     print(
         f"[INFO] Unit-Animation importiert. "
         f"format={source_format}, root_id={root_id}, fps={scene.render.fps}, "
@@ -1438,9 +1459,10 @@ def build_active_unit_animation_payload(context, filepath):
 
     action = armature_object.animation_data.action
     scene = context.scene
-    frame_start = int(scene.frame_start)
-    frame_end = int(scene.frame_end)
-    fps = int(scene.render.fps) if scene.render.fps > 0 else DEFAULT_S5_FPS
+    frame_start = float(action.frame_range[0]) if action is not None else float(scene.frame_start)
+    frame_end = float(action.frame_range[1]) if action is not None else float(scene.frame_end)
+    ensure_action_anim_fps(action, DEFAULT_S5_FPS)
+    fps = get_action_anim_fps(action, DEFAULT_S5_FPS)
     root_id = resolve_unit_animation_root_id(armature_object, filepath)
 
     return build_unit_animation_export_json(
@@ -1457,9 +1479,10 @@ def build_active_unit_animation_payload(context, filepath):
 def build_unit_animation_payload_for_action(context, filepath, action):
     armature_object = ensure_armature_active()
     scene = context.scene
-    frame_start = int(scene.frame_start)
-    frame_end = int(scene.frame_end)
-    fps = int(scene.render.fps) if scene.render.fps > 0 else DEFAULT_S5_FPS
+    frame_start = float(action.frame_range[0]) if action is not None else float(scene.frame_start)
+    frame_end = float(action.frame_range[1]) if action is not None else float(scene.frame_end)
+    ensure_action_anim_fps(action, DEFAULT_S5_FPS)
+    fps = get_action_anim_fps(action, DEFAULT_S5_FPS)
     root_id = resolve_unit_animation_root_id(armature_object, filepath)
 
     return build_unit_animation_export_json(

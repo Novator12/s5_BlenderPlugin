@@ -10,11 +10,13 @@ from .unit_utilities import (
     build_active_unit_animation_payload,
     collect_armature_actions,
     convert_json_to_anm_external,
+    ensure_action_anim_fps,
     ensure_action_export_name,
     ensure_armature_active,
     isolate_action_for_export,
     restore_action_after_export,
 )
+from .building_utilities import DEFAULT_S5_FPS
 
 
 def _resolve_armature_for_ui(context):
@@ -79,18 +81,14 @@ class UnitAnmExportOperator(Operator, ExportHelper):
             if active_action is None:
                 box.label(text="Keine aktive Action gefunden.")
             else:
-                ensure_action_export_name(active_action)
                 box.label(text="Active: {}".format(active_action.name))
-                box.prop(active_action, '["s5_export_name"]', text="Export Name")
         else:
             self.layout.label(text="Beim Multi-Export wird nur der Zielordner verwendet.")
             if not actions:
                 self.layout.label(text="Keine Actions gefunden.")
             for action in actions:
-                ensure_action_export_name(action)
                 box = self.layout.box()
                 box.label(text=action.name)
-                box.prop(action, '["s5_export_name"]', text="Export Name")
 
     def execute(self, context):
         current_frame = context.scene.frame_current

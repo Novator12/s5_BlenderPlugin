@@ -31,7 +31,23 @@ from .building_anm_export import BuildingAnmExportOperator
 from .building_anm_import import BuildingAnmImportOperator
 from .unit_anm_export import UnitAnmExportOperator
 from .unit_anm_import import UnitAnmImportOperator
-from .building_utilities import ensure_action_stashed_in_muted_nla
+from .building_utilities import (
+    ACTION_ANIM_FPS_PROP,
+    ACTION_ANIM_FORMAT_PROP,
+    ACTION_EXPORT_NAME_PROP,
+    ACTION_START_PREV_KEYFRAME_PROP,
+    ANIM_FORMAT_COMPRESSED,
+    ANIM_FORMAT_HIERARCHICAL,
+    ANIM_FORMAT_NODES,
+    DEFAULT_S5_FPS,
+    DEFAULT_ANIM_FORMAT,
+    DEFAULT_START_PREV_KEYFRAME,
+    ensure_action_anim_fps,
+    ensure_action_anim_format,
+    ensure_action_stashed_in_muted_nla,
+    parse_action_anim_fps,
+    parse_action_start_prev_keyframe,
+)
 from .building_model_export import (
     BuildingExportOperator,
     write_building_model,
@@ -88,6 +104,64 @@ def _get_active_armature_action(context):
     return active_object, animation_data.action
 
 
+def _resolve_active_action(context):
+    space_data = getattr(context, "space_data", None)
+    action = getattr(space_data, "action", None)
+    if action is not None:
+        return action
+
+    _armature_object, action = _get_active_armature_action(context)
+    return action
+
+
+def _collect_action_fcurves(action):
+    fcurves = []
+    seen = set()
+
+    def _append_fcurve(fc):
+        if fc is None:
+            return
+        identifier = getattr(fc, "as_pointer", None)
+        key = identifier() if callable(identifier) else id(fc)
+        if key in seen:
+            return
+        seen.add(key)
+        fcurves.append(fc)
+
+    try:
+        for fc in action.fcurves:
+            _append_fcurve(fc)
+    except Exception:
+        pass
+
+    try:
+        slots = list(getattr(action, "slots", []))
+        layers = list(getattr(action, "layers", []))
+        for layer in layers:
+            for strip in getattr(layer, "strips", []):
+                if slots:
+                    for slot in slots:
+                        try:
+                            channelbag = strip.channelbag(slot)
+                        except Exception:
+                            continue
+                        if channelbag:
+                            for fc in getattr(channelbag, "fcurves", []):
+                                _append_fcurve(fc)
+                else:
+                    try:
+                        channelbag = strip.channelbag(action_slot=None)
+                    except Exception:
+                        channelbag = None
+                    if channelbag:
+                        for fc in getattr(channelbag, "fcurves", []):
+                            _append_fcurve(fc)
+    except Exception:
+        pass
+
+    return fcurves
+
+
 def _sync_scene_range_to_action(scene, action):
     if action is None:
         return
@@ -103,6 +177,79 @@ def _sync_scene_range_to_action(scene, action):
     scene.frame_end = frame_length
     scene.frame_set(0)
     bpy.context.view_layer.update()
+
+
+class ACTION_OT_apply_animation_fps(Operator):
+    bl_idname = "action.apply_animation_fps"
+    bl_label = "Apply FPS"
+
+    def execute(self, context):
+        action = _resolve_active_action(context)
+        if action is None:
+            self.report({"ERROR"}, "Keine aktive Action gefunden.")
+            return {"CANCELLED"}
+
+        try:
+            target_fps = parse_action_anim_fps(action, DEFAULT_S5_FPS)
+            parse_action_start_prev_keyframe(action, DEFAULT_START_PREV_KEYFRAME)
+        except ValueError as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+
+        current_fps = int(round(context.scene.render.fps)) if context.scene.render.fps > 0 else DEFAULT_S5_FPS
+        if current_fps <= 0:
+            current_fps = DEFAULT_S5_FPS
+
+        scale = float(target_fps) / float(current_fps)
+        if abs(scale - 1.0) > 1.0e-9:
+            for fcurve in _collect_action_fcurves(action):
+                for keyframe in getattr(fcurve, "keyframe_points", []):
+                    keyframe.co.x *= scale
+                    keyframe.handle_left.x *= scale
+                    keyframe.handle_right.x *= scale
+                try:
+                    fcurve.update()
+                except Exception:
+                    pass
+
+        scene = context.scene
+        scene.render.fps = target_fps
+        scene.render.fps_base = 1.0
+        _sync_scene_range_to_action(scene, action)
+
+        self.report({"INFO"}, "Animation FPS auf {} angewendet.".format(target_fps))
+        return {"FINISHED"}
+
+
+class ACTION_PT_animation_fps(Panel):
+    bl_idname = "DOPESHEET_PT_animation_fps"
+    bl_label = "Animation Tool"
+    bl_space_type = "DOPESHEET_EDITOR"
+    bl_region_type = "UI"
+    bl_category = "Animation Tool"
+
+    def draw(self, context):
+        layout = self.layout
+        try:
+            action = _resolve_active_action(context)
+
+            if action is None:
+                layout.label(text="Keine aktive Action gefunden.")
+                return
+
+            col = layout.column(align=True)
+            row = col.row(align=True)
+            row.label(text="Animation:")
+            row.label(text=action.name)
+            ensure_action_anim_format(action, DEFAULT_ANIM_FORMAT)
+            col.prop(action, ACTION_ANIM_FPS_PROP, text="FPS", slider=False)
+            col.prop(action, ACTION_ANIM_FORMAT_PROP, text="Anim-Type")
+            col.prop(action, ACTION_START_PREV_KEYFRAME_PROP, text="Start-Prev-Keyframe", slider=False)
+            layout.separator()
+            layout.operator(ACTION_OT_apply_animation_fps.bl_idname, text="Apply FPS")
+        except Exception as exc:
+            layout.label(text="UI-Fehler im Animation Tool.")
+            layout.label(text=str(exc))
 
 
 @persistent
@@ -681,6 +828,8 @@ CLASSES = (
     UnitAnmImportOperator,
     UnitExportOperator,
     UnitAnmExportOperator,
+    ACTION_OT_apply_animation_fps,
+    ACTION_PT_animation_fps,
 
     # Deine UI/Property Klassen (wie bei dir vorhanden)
     BoneMappingItem,
@@ -802,6 +951,19 @@ def register():
     bpy.types.Scene.geometry_tool_items = CollectionProperty(type=GeometryExportRecord)
     bpy.types.Scene.geometry_tool_index = IntProperty(default=0)
 
+    bpy.types.Action.s5_anim_fps = StringProperty(name="FPS", default=str(DEFAULT_S5_FPS))
+    bpy.types.Action.s5_anim_format = EnumProperty(
+        name="Anim-Type",
+        items=(
+            (ANIM_FORMAT_HIERARCHICAL, "HierarchicalAnim", "Use HierarchicalAnim metadata"),
+            (ANIM_FORMAT_COMPRESSED, "CompressedAnim", "Use CompressedAnim metadata"),
+            (ANIM_FORMAT_NODES, "Nodes", "Use converter nodes[] metadata"),
+        ),
+        default=DEFAULT_ANIM_FORMAT,
+    )
+    bpy.types.Action.s5_export_name = StringProperty(name="Export-Name", default="")
+    bpy.types.Action.s5_import_prev_keyframe = StringProperty(name="Start-Prev-Keyframe", default=str(DEFAULT_START_PREV_KEYFRAME))
+
     register_file_menu_entries()
     _LAST_ACTION_SYNC_KEY = None
     _LAST_ACTION_BY_OBJECT = {}
@@ -822,6 +984,10 @@ def unregister():
     for attr in ("bone_items","bone_active_index","particle_effects","particle_effects_index","geometry_tool_items","geometry_tool_index"):
         if hasattr(bpy.types.Scene, attr):
             delattr(bpy.types.Scene, attr)
+
+    for attr in ("s5_anim_fps", "s5_anim_format", "s5_export_name", "s5_import_prev_keyframe"):
+        if hasattr(bpy.types.Action, attr):
+            delattr(bpy.types.Action, attr)
 
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)

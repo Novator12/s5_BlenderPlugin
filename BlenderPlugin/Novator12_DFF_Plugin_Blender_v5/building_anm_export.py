@@ -10,8 +10,10 @@ from .building_utilities import (
     build_animation_export_json,
     collect_armature_actions,
     convert_json_to_anm_external,
+    ensure_action_anim_fps,
     ensure_action_export_name,
     ensure_armature_active,
+    get_action_anim_fps,
     isolate_action_for_export,
     restore_action_after_export,
     resolve_export_root_id,
@@ -32,14 +34,14 @@ def _resolve_armature_for_ui(context):
 
 def _resolve_action_frame_range(action, scene):
     if action is None:
-        return int(scene.frame_start), int(scene.frame_end)
+        return float(scene.frame_start), float(scene.frame_end)
 
     try:
-        frame_start = int(round(action.frame_range[0]))
-        frame_end = int(round(action.frame_range[1]))
+        frame_start = float(action.frame_range[0])
+        frame_end = float(action.frame_range[1])
     except Exception:
-        frame_start = int(scene.frame_start)
-        frame_end = int(scene.frame_end)
+        frame_start = float(scene.frame_start)
+        frame_end = float(scene.frame_end)
 
     if frame_end < frame_start:
         frame_end = frame_start
@@ -56,7 +58,7 @@ def _build_animation_payload(context, filepath, action=None):
 
     scene = context.scene
     frame_start, frame_end = _resolve_action_frame_range(active_action, scene)
-    fps = int(scene.render.fps) if scene.render.fps > 0 else DEFAULT_S5_FPS
+    fps = get_action_anim_fps(active_action, DEFAULT_S5_FPS)
     root_id = resolve_export_root_id(armature_object, filepath)
 
     return build_animation_export_json(
@@ -120,18 +122,14 @@ class BuildingAnmExportOperator(Operator, ExportHelper):
             if active_action is None:
                 box.label(text="Keine aktive Action gefunden.")
             else:
-                ensure_action_export_name(active_action)
                 box.label(text="Active: {}".format(active_action.name))
-                box.prop(active_action, '["s5_export_name"]', text="Export Name")
         else:
             self.layout.label(text="Beim Multi-Export wird nur der Zielordner verwendet.")
             if not actions:
                 self.layout.label(text="Keine Actions gefunden.")
             for action in actions:
-                ensure_action_export_name(action)
                 box = self.layout.box()
                 box.label(text=action.name)
-                box.prop(action, '["s5_export_name"]', text="Export Name")
 
     def execute(self, context):
         current_frame = context.scene.frame_current

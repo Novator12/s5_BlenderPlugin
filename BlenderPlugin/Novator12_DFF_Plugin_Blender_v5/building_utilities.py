@@ -822,8 +822,22 @@ def build_building_atomic_entry(frame_index, geometry_index, particle_data, bone
                 atomic_entry["extension"] = {"MaterialFXAtomic_EffectsEnabled": True}
                 return atomic_entry
 
-    if frame_index in particle_data_map:
-        atomic_entry["extension"]["ParticleStandard"] = particle_data_map[frame_index]
+    particle_standard = None
+    if particle_data_map:
+        particle_standard = particle_data_map.get(frame_index)
+        if particle_standard is None:
+            particle_standard = particle_data_map.get(str(frame_index))
+        if particle_standard is None:
+            for key, value in particle_data_map.items():
+                try:
+                    if int(key) == int(frame_index):
+                        particle_standard = value
+                        break
+                except Exception:
+                    continue
+
+    if particle_standard is not None:
+        atomic_entry["extension"]["ParticleStandard"] = particle_standard
         return atomic_entry
 
     if particle_data:
@@ -1057,12 +1071,30 @@ def get_bone_index_by_name(bone_names, bone_name):
 
 
 def collect_meshes_for_armature(armature_object):
+    meshes = [
+        obj
+        for obj in bpy.data.objects
+        if obj.type == "MESH" and any(mod.type == "ARMATURE" and mod.object == armature_object for mod in obj.modifiers)
+    ]
+
+    scene = getattr(bpy.context, "scene", None)
+    geometry_order = []
+    if scene is not None and hasattr(scene, "geometry_tool_items"):
+        geometry_order = [entry.mesh_name for entry in scene.geometry_tool_items]
+
+    if geometry_order:
+        index_by_name = {name: index for index, name in enumerate(geometry_order)}
+        return sorted(
+            meshes,
+            key=lambda obj: (
+                index_by_name.get(obj.name, 10**9),
+                int(re.search(r"\d+$", obj.name).group()) if re.search(r"\d+$", obj.name) else 10**9,
+                obj.name,
+            ),
+        )
+
     return sorted(
-        [
-            obj
-            for obj in bpy.data.objects
-            if obj.type == "MESH" and any(mod.type == "ARMATURE" and mod.object == armature_object for mod in obj.modifiers)
-        ],
+        meshes,
         key=lambda obj: int(re.search(r"\d+$", obj.name).group()) if re.search(r"\d+$", obj.name) else -1,
     )
 
@@ -1203,7 +1235,7 @@ def sync_imported_particle_effects(clump_data, particle_data_map):
         particle_standard = extension.get("ParticleStandard")
 
         if "ParticleStandard" in extension:
-            particle_data_map[frame_index] = particle_standard
+            particle_data_map[int(frame_index)] = particle_standard
             effect_item = scene.particle_effects.add()
             effect_item.bone_index = str(frame_index)
             effect_item.effect_type = "Ubisoft"
@@ -1262,6 +1294,8 @@ def import_building_clump(js, use_connect, atomic_material_fx_data, particle_dat
     updated_particle_data = sync_imported_particle_effects(clump_data, particle_data_map)
     updated_atomic_fx_data = collect_atomic_material_fx_state(clump_data, atomic_material_fx_data)
     hide_import_proxy_meshes()
+    if bpy.ops.object.mode_set.poll():
+        bpy.ops.object.mode_set(mode="OBJECT")
 
     return updated_atomic_fx_data, updated_particle_data
 
@@ -1351,9 +1385,23 @@ def collect_building_scene_export_payload(scene):
 
 # ===== building_animation_io.py =====
 
-DEFAULT_S5_FPS = 24
+DEFAULT_S5_FPS = 30
 MIN_ANIM_NODE_ID = 600
 DEFAULT_START_PREV_KEYFRAME = -123456789
+ACTION_ANIM_FPS_PROP = "s5_anim_fps"
+ACTION_EXPORT_NAME_PROP = "s5_export_name"
+ACTION_START_PREV_KEYFRAME_PROP = "s5_import_prev_keyframe"
+ACTION_ANIM_FORMAT_PROP = "s5_anim_format"
+ANIM_FORMAT_HIERARCHICAL = "hierarchical"
+ANIM_FORMAT_COMPRESSED = "compressed"
+ANIM_FORMAT_NODES = "nodes"
+DEFAULT_ANIM_FORMAT = ANIM_FORMAT_HIERARCHICAL
+
+
+def is_building_anim_node_id(node_id: int | None) -> bool:
+    if node_id is None:
+        return False
+    return 500 <= int(node_id) < 600 or int(node_id) >= MIN_ANIM_NODE_ID
 
 
 # ------------------------------------------------------------
@@ -1394,7 +1442,7 @@ def root_id_from_filename(path: str) -> int:
     pb_farm3_600.anm
     pb_farm3_600.json
 
-    Gültige Anim-Root-IDs sind >= 600.
+    Gültige Anim-Root-IDs sind 500-599 oder >= 600.
     """
     name = os.path.splitext(os.path.basename(path))[0]
     m = re.search(r'_(\d+)$', name)
@@ -1402,10 +1450,10 @@ def root_id_from_filename(path: str) -> int:
         raise RuntimeError(f"Keine Root-ID im Dateinamen gefunden: {name}")
 
     root_id = int(m.group(1))
-    if root_id < MIN_ANIM_NODE_ID:
+    if not is_building_anim_node_id(root_id):
         raise RuntimeError(
             f"Ungültige Anim-Root-ID im Dateinamen: {root_id}. "
-            f"Erwartet wird eine NodeID >= {MIN_ANIM_NODE_ID}."
+            f"Erwartet wird eine NodeID im Bereich 500-599 oder >= {MIN_ANIM_NODE_ID}."
         )
     return root_id
 
@@ -1463,18 +1511,18 @@ def get_bone_hanim_data(bone) -> dict | None:
 def detect_animation_root_bone(arm_ob: bpy.types.Object):
     """
     Erkennt den wahrscheinlichsten Anim-Root im Rig.
-    Kandidaten sind Bones mit NodeID >= 600, deren Parent keine Anim-Node ist.
+    Kandidaten sind Bones mit Building-Anim-NodeID, deren Parent keine Anim-Node ist.
     Bei mehreren Kandidaten gewinnt der mit dem größten Anim-Subtree.
     """
     candidates = []
 
     for bone in arm_ob.data.bones:
         node_id = parse_node_id_from_bone_name(bone.name)
-        if node_id is None or node_id < MIN_ANIM_NODE_ID:
+        if not is_building_anim_node_id(node_id):
             continue
 
         parent_node_id = parse_node_id_from_bone_name(bone.parent.name) if bone.parent else None
-        if parent_node_id is not None and parent_node_id >= MIN_ANIM_NODE_ID:
+        if is_building_anim_node_id(parent_node_id):
             continue
 
         subtree_count = len(collect_subtree_node_ids(bone))
@@ -1501,7 +1549,7 @@ def resolve_export_root_id(arm_ob: bpy.types.Object, filepath: str) -> int:
     if not root_bone:
         raise RuntimeError(
             "Keine Root-ID im Dateinamen gefunden und kein Anim-Root im Rig erkannt. "
-            "Bitte Dateiname wie '*_600.anm' verwenden oder Rig prüfen."
+            "Bitte Dateiname wie '*_502.anm' oder '*_600.anm' verwenden oder Rig prüfen."
         )
 
     root_id = parse_node_id_from_bone_name(root_bone.name)
@@ -1521,13 +1569,13 @@ def collect_anim_bones_for_building(root_bone) -> list:
     Fallback:
     Root selbst ist Teil der animierten Kette.
     Danach rekursiv die Kinder.
-    Nur Bones mit NodeID >= 600 sind für Animation relevant.
+    Nur Bones mit Building-Anim-NodeID sind für Animation relevant.
     """
     ordered = []
 
     def rec(b):
         nid = parse_node_id_from_bone_name(b.name)
-        if nid is not None and nid >= MIN_ANIM_NODE_ID:
+        if is_building_anim_node_id(nid):
             ordered.append(b)
 
         kids = sorted(list(b.children), key=lambda x: (parse_frame_index_from_bone_name(x.name), x.name))
@@ -1541,13 +1589,13 @@ def collect_anim_bones_for_building(root_bone) -> list:
 def collect_subtree_node_ids(root_bone) -> set[int]:
     """
     Nur der Anim-Root aus dem Dateinamen und dessen Kinder/Subchildren sind relevant.
-    Zusätzlich nur NodeIDs >= 600.
+    Zusätzlich nur Building-Anim-NodeIDs.
     """
     ids = set()
 
     def rec(b):
         nid = parse_node_id_from_bone_name(b.name)
-        if nid is not None and nid >= MIN_ANIM_NODE_ID:
+        if is_building_anim_node_id(nid):
             ids.add(nid)
         for c in b.children:
             rec(c)
@@ -1597,7 +1645,7 @@ def extract_hanim_node_ids_from_bone(bone) -> list[int]:
         if node_id is not None:
             try:
                 node_id = int(node_id)
-                if node_id >= MIN_ANIM_NODE_ID:
+                if is_building_anim_node_id(node_id):
                     ordered_ids.append(node_id)
             except Exception:
                 pass
@@ -1609,7 +1657,7 @@ def collect_hanim_node_order_for_animation(arm_ob: bpy.types.Object, root_bone) 
     """
     Holt die HAnim-Node-Reihenfolge, filtert aber IMMER hart auf:
     root bone + children + subchildren des Anim-Roots
-    und nur NodeIDs >= 600.
+    und nur Building-Anim-NodeIDs.
 
     Suchreihenfolge für die Quelle der HAnim-Liste:
     1. Root-Bone selbst
@@ -1707,11 +1755,29 @@ def estimate_fps_from_tracks(tracks) -> int:
 
 
 def determine_fps(source_format: str, tracks) -> int:
+    if source_format in {"hierarchical", "compressed"}:
+        return DEFAULT_S5_FPS
+
     return estimate_fps_from_tracks(tracks)
 
 
-def s5_time_to_frame(t: float, fps: int) -> int:
-    return int(round(t * fps))
+def s5_time_to_frame(t: float, fps: int) -> float:
+    return float(t * fps)
+
+
+def split_subframe(frame: float) -> tuple[int, float]:
+    base_frame = math.floor(float(frame))
+    subframe = float(frame) - float(base_frame)
+    if subframe >= 0.999999:
+        return int(base_frame) + 1, 0.0
+    if subframe <= 0.000001:
+        return int(base_frame), 0.0
+    return int(base_frame), subframe
+
+
+def set_scene_frame(scene: bpy.types.Scene, frame: float):
+    base_frame, subframe = split_subframe(frame)
+    scene.frame_set(base_frame, subframe=subframe)
 
 
 def generate_prev_keyframe_sentinel(source_name: str, root_id: int, bone_count: int) -> int:
@@ -1938,7 +2004,7 @@ def posebone_set_from_local_matrix(arm_ob: bpy.types.Object, pb: bpy.types.PoseB
     pb.matrix_basis = basis_mtx
 
 
-def insert_posebone_keys(pb: bpy.types.PoseBone, frame: int):
+def insert_posebone_keys(pb: bpy.types.PoseBone, frame: float):
     pb.keyframe_insert(data_path="location", frame=frame)
     pb.keyframe_insert(data_path="rotation_quaternion", frame=frame)
     pb.keyframe_insert(data_path="scale", frame=frame)
@@ -1961,13 +2027,120 @@ def ensure_action_export_name(action: bpy.types.Action, fallback_name: str | Non
     if action is None:
         return fallback_name or "Animation"
 
-    export_name = action.get("s5_export_name")
+    export_name = getattr(action, ACTION_EXPORT_NAME_PROP, "")
     if isinstance(export_name, str) and export_name.strip():
-        return export_name.strip()
+        export_name = export_name.strip()
+        setattr(action, ACTION_EXPORT_NAME_PROP, export_name)
+        return export_name
+
+    legacy_export_name = action.get(ACTION_EXPORT_NAME_PROP)
+    if isinstance(legacy_export_name, str) and legacy_export_name.strip():
+        export_name = legacy_export_name.strip()
+        setattr(action, ACTION_EXPORT_NAME_PROP, export_name)
+        return export_name
 
     export_name = action_name_from_source(fallback_name or action.name)
-    action["s5_export_name"] = export_name
+    setattr(action, ACTION_EXPORT_NAME_PROP, export_name)
     return export_name
+
+
+def sanitize_anim_fps_value(value, fallback: int = DEFAULT_S5_FPS) -> int:
+    try:
+        fps = int(round(float(value)))
+    except Exception:
+        fps = int(fallback)
+    return max(1, fps)
+
+
+def parse_int_string_value(value, error_message: str) -> int:
+    if isinstance(value, int):
+        return value
+
+    text = str(value).strip()
+    if not text:
+        raise ValueError(error_message)
+
+    if text[0] in "+-":
+        sign = text[0]
+        digits = text[1:]
+        if not digits.isdigit():
+            raise ValueError(error_message)
+        return int(sign + digits)
+
+    if not text.isdigit():
+        raise ValueError(error_message)
+
+    return int(text)
+
+
+def parse_action_anim_fps(action: bpy.types.Action | None, fallback: int = DEFAULT_S5_FPS) -> int:
+    if action is None:
+        return sanitize_anim_fps_value(fallback, fallback)
+
+    return max(1, parse_int_string_value(getattr(action, ACTION_ANIM_FPS_PROP, fallback), "FPS-Input is no integer value"))
+
+
+def parse_action_start_prev_keyframe(action: bpy.types.Action | None, fallback: int = DEFAULT_START_PREV_KEYFRAME) -> int:
+    if action is None:
+        return int(fallback)
+
+    return parse_int_string_value(
+        getattr(action, ACTION_START_PREV_KEYFRAME_PROP, fallback),
+        "Start-Prev-Keyframe is no integer value",
+    )
+
+
+def ensure_action_anim_fps(action: bpy.types.Action | None, fallback: int = DEFAULT_S5_FPS) -> int:
+    fps = sanitize_anim_fps_value(fallback, fallback)
+    if action is None:
+        return fps
+
+    stored = getattr(action, ACTION_ANIM_FPS_PROP, None)
+    if stored is None:
+        stored = action.get(ACTION_ANIM_FPS_PROP)
+    fps = sanitize_anim_fps_value(stored if stored is not None else fallback, fallback)
+    setattr(action, ACTION_ANIM_FPS_PROP, str(fps))
+    return fps
+
+
+def get_action_anim_fps(action: bpy.types.Action | None, fallback: int = DEFAULT_S5_FPS) -> int:
+    return ensure_action_anim_fps(action, fallback)
+
+
+def set_action_anim_fps(action: bpy.types.Action | None, fps: int):
+    if action is None:
+        return
+    setattr(action, ACTION_ANIM_FPS_PROP, str(sanitize_anim_fps_value(fps)))
+
+
+def sanitize_anim_format_value(value, fallback: str = DEFAULT_ANIM_FORMAT) -> str:
+    text = str(value).strip().lower()
+    if text in {ANIM_FORMAT_HIERARCHICAL, ANIM_FORMAT_COMPRESSED, ANIM_FORMAT_NODES}:
+        return text
+    return fallback
+
+
+def ensure_action_anim_format(action: bpy.types.Action | None, fallback: str = DEFAULT_ANIM_FORMAT) -> str:
+    anim_format = sanitize_anim_format_value(fallback, DEFAULT_ANIM_FORMAT)
+    if action is None:
+        return anim_format
+
+    stored = getattr(action, ACTION_ANIM_FORMAT_PROP, None)
+    if stored is None:
+        stored = action.get(ACTION_ANIM_FORMAT_PROP)
+    anim_format = sanitize_anim_format_value(stored if stored is not None else fallback, fallback)
+    setattr(action, ACTION_ANIM_FORMAT_PROP, anim_format)
+    return anim_format
+
+
+def get_action_anim_format(action: bpy.types.Action | None, fallback: str = DEFAULT_ANIM_FORMAT) -> str:
+    return ensure_action_anim_format(action, fallback)
+
+
+def set_action_anim_format(action: bpy.types.Action | None, anim_format: str):
+    if action is None:
+        return
+    setattr(action, ACTION_ANIM_FORMAT_PROP, sanitize_anim_format_value(anim_format))
 
 
 def build_unique_action_name(base_name: str) -> str:
@@ -2026,7 +2199,9 @@ def create_import_action(arm_ob: bpy.types.Object, source_name: str) -> bpy.type
     action_name = build_unique_action_name(action_base_name)
     action = bpy.data.actions.new(action_name)
     action.use_fake_user = True
-    action["s5_export_name"] = action_base_name
+    setattr(action, ACTION_EXPORT_NAME_PROP, action_base_name)
+    set_action_anim_fps(action, DEFAULT_S5_FPS)
+    set_action_anim_format(action, DEFAULT_ANIM_FORMAT)
     arm_ob.animation_data.action = action
     return action
 
@@ -2083,7 +2258,7 @@ def store_imported_animation_metadata(arm_ob: bpy.types.Object, action: bpy.type
 
     arm_ob["s5_import_prev_keyframe"] = int(prev_keyframe_value)
     if action is not None:
-        action["s5_import_prev_keyframe"] = int(prev_keyframe_value)
+        setattr(action, ACTION_START_PREV_KEYFRAME_PROP, str(int(prev_keyframe_value)))
 
 
 def resolve_start_prev_keyframe_value(
@@ -2093,9 +2268,13 @@ def resolve_start_prev_keyframe_value(
     root_id: int,
     bone_count: int,
 ) -> int:
-    if action is not None and "s5_import_prev_keyframe" in action:
+    if action is not None:
         try:
-            return int(action["s5_import_prev_keyframe"])
+            return parse_action_start_prev_keyframe(action)
+        except Exception:
+            pass
+        try:
+            return int(action.get(ACTION_START_PREV_KEYFRAME_PROP))
         except Exception:
             pass
 
@@ -2159,9 +2338,9 @@ def get_posebone_local_anim_matrix(arm_ob: bpy.types.Object, pb: bpy.types.PoseB
 def collect_keyed_frames_for_bone(
     action: bpy.types.Action,
     bone_name: str,
-    frame_start: int,
-    frame_end: int,
-) -> list[int]:
+    frame_start: float,
+    frame_end: float,
+) -> list[float]:
     """
     Holt echte Keyframes aus klassischem oder Layered-Action-Setup.
     Fallback bleibt Vollsampling des Frame-Bereichs.
@@ -2206,14 +2385,16 @@ def collect_keyed_frames_for_bone(
         if not data_path.startswith(prefix):
             continue
         for kp in getattr(fc, "keyframe_points", []):
-            frame = int(round(kp.co.x))
+            frame = float(kp.co.x)
             if frame_start <= frame <= frame_end:
                 frames.add(frame)
 
     if not frames:
         if frame_end < frame_start:
             return [frame_start]
-        return list(range(frame_start, frame_end + 1))
+        current = int(math.floor(frame_start))
+        final_frame = int(math.ceil(frame_end))
+        return [float(frame) for frame in range(current, final_frame + 1)]
 
     frames.add(frame_start)
     frames.add(frame_end)
@@ -2224,9 +2405,9 @@ def build_converter_track_for_bone(
     scene: bpy.types.Scene,
     arm_ob: bpy.types.Object,
     bone,
-    frames: list[int],
+    frames: list[float],
     fps: int,
-    base_frame: int,
+    base_frame: float,
 ) -> list[dict]:
     pb = arm_ob.pose.bones.get(bone.name)
     if not pb:
@@ -2236,7 +2417,7 @@ def build_converter_track_for_bone(
     pb.rotation_mode = "QUATERNION"
 
     for frame in frames:
-        scene.frame_set(frame)
+        set_scene_frame(scene, frame)
         bpy.context.view_layer.update()
 
         local_anim_mtx = get_posebone_local_anim_matrix(arm_ob, pb)
@@ -2273,18 +2454,29 @@ def build_animation_export_json(
     if not anim_bones:
         raise RuntimeError(f"Keine animierbaren Bones unter Root {root_id} gefunden.")
 
-    duration = max(0.0, float(frame_end - frame_start) / fps)
+    track_frames = []
+    for bone in anim_bones:
+        track_frames.append(collect_keyed_frames_for_bone(action, bone.name, frame_start, frame_end))
+
+    non_empty_frames = [frames for frames in track_frames if frames]
+    if non_empty_frames:
+        export_frame_start = min(min(frames) for frames in non_empty_frames)
+        export_frame_end = max(max(frames) for frames in non_empty_frames)
+    else:
+        export_frame_start = frame_start
+        export_frame_end = frame_end
+
+    duration = max(0.0, float(export_frame_end - export_frame_start) / fps)
     track_entries = []
 
-    for bone in anim_bones:
-        frames = collect_keyed_frames_for_bone(action, bone.name, frame_start, frame_end)
+    for bone, frames in zip(anim_bones, track_frames):
         track = build_converter_track_for_bone(
             scene=bpy.context.scene,
             arm_ob=arm_ob,
             bone=bone,
             frames=frames,
             fps=fps,
-            base_frame=frame_start,
+            base_frame=export_frame_start,
         )
 
         entries = []
@@ -2388,10 +2580,13 @@ def apply_tracks_to_armature(
 
     scene = bpy.context.scene
     scene.render.fps = fps
+    scene.render.fps_base = 1.0
     scene.frame_start = 0
     scene.frame_end = max(0, int(round(duration * fps)))
 
     action = create_import_action(arm_ob, action_source_name or f"SkinAction_{root_id}")
+    set_action_anim_fps(action, fps)
+    set_action_anim_format(action, source_format)
 
     bpy.context.view_layer.objects.active = arm_ob
     arm_ob.select_set(True)
@@ -2417,7 +2612,7 @@ def apply_tracks_to_armature(
 
         for key in tracks[i]:
             frame = s5_time_to_frame(float(key["time"]), fps)
-            scene.frame_set(frame)
+            set_scene_frame(scene, frame)
 
             local_anim_mtx = key["matrix"]
             posebone_set_from_local_matrix(arm_ob, pb, local_anim_mtx)
@@ -2432,6 +2627,8 @@ def apply_tracks_to_armature(
     scene.frame_end = action_frame_end
     scene.frame_set(0)
     bpy.context.view_layer.update()
+    if bpy.ops.object.mode_set.poll():
+        bpy.ops.object.mode_set(mode="OBJECT")
     print(
         f"[INFO] Animation importiert. "
         f"format={source_format}, root_id={root_id}, fps={fps}, tracks={len(tracks)}, used={n}"
@@ -2441,7 +2638,7 @@ def apply_tracks_to_armature(
 
 def apply_animation_json_to_armature(json_path: str, arm_ob: bpy.types.Object, source_name_for_root: str):
     duration, tracks, source_format = parse_animation_json(json_path)
-    root_id = root_id_from_filename(source_name_for_root)
+    root_id = resolve_export_root_id(arm_ob, source_name_for_root)
     action = apply_tracks_to_armature(arm_ob, root_id, duration, tracks, source_format, source_name_for_root)
     with open(json_path, "r", encoding="utf-8") as f:
         js = json.load(f)
@@ -2451,7 +2648,7 @@ def apply_animation_json_to_armature(json_path: str, arm_ob: bpy.types.Object, s
 
 def apply_animation_data_to_armature(js: dict, arm_ob: bpy.types.Object, source_name_for_root: str):
     duration, tracks, source_format = parse_animation_data(js)
-    root_id = root_id_from_filename(source_name_for_root)
+    root_id = resolve_export_root_id(arm_ob, source_name_for_root)
     action = apply_tracks_to_armature(arm_ob, root_id, duration, tracks, source_format, source_name_for_root)
     store_imported_animation_metadata(arm_ob, action, js)
     return action
