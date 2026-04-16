@@ -12,6 +12,7 @@ bl_info = {
     "category": "Import-Export",
 }
 
+import bmesh
 import bpy
 from bpy.app.handlers import persistent
 
@@ -709,6 +710,217 @@ class GEOMETRY_OT_remove_material(Operator):
         return {'FINISHED'}
 
 
+def _format_index_preview(indices, limit=8):
+    if not indices:
+        return "-"
+
+    preview = ", ".join(str(index) for index in indices[:limit])
+    if len(indices) > limit:
+        preview += ", ..."
+    return preview
+
+
+def _collect_loose_vertex_indices(mesh_object):
+    mesh_data = mesh_object.data
+    used_vertices = set()
+
+    for polygon in mesh_data.polygons:
+        used_vertices.update(polygon.vertices)
+
+    all_vertices = set(range(len(mesh_data.vertices)))
+    return sorted(all_vertices - used_vertices)
+
+
+def _validate_selected_mesh_lines(context, mesh_object):
+    mesh_data = mesh_object.data
+    non_triangle_polygons = []
+    degenerate_polygons = []
+    loose_vertices = _collect_loose_vertex_indices(mesh_object)
+
+    for polygon in mesh_data.polygons:
+        polygon_vertices = list(polygon.vertices)
+
+        if len(polygon_vertices) != 3:
+            non_triangle_polygons.append(polygon.index)
+
+        if len(set(polygon_vertices)) < len(polygon_vertices):
+            degenerate_polygons.append(polygon.index)
+
+    lines = [
+        f"Mesh: {mesh_object.name}",
+        f"Vertices: {len(mesh_data.vertices)} | Faces: {len(mesh_data.polygons)} | UV-Layers: {len(mesh_data.uv_layers)}",
+    ]
+
+    if non_triangle_polygons:
+        lines.append(
+            "ERROR: Nicht-triangulierte Faces gefunden. "
+            f"Exporter nimmt nur die ersten 3 Vertices. Face-Indizes: {_format_index_preview(non_triangle_polygons)}"
+        )
+    else:
+        lines.append("OK: Alle Faces sind trianguliert.")
+
+    if degenerate_polygons:
+        lines.append(
+            "ERROR: Degenerierte Faces mit doppelten Vertex-Indizes gefunden. "
+            f"Face-Indizes: {_format_index_preview(degenerate_polygons)}"
+        )
+
+    if loose_vertices:
+        lines.append(
+            "WARN: Lose/unbenutzte Vertices gefunden. "
+            f"Vertex-Indizes: {_format_index_preview(loose_vertices)}"
+        )
+    else:
+        lines.append("OK: Keine losen Vertices gefunden.")
+
+    if not mesh_data.uv_layers:
+        lines.append("WARN: Keine UV-Layer vorhanden.")
+    else:
+        tolerance = 1.0e-6
+        used_vertices = set(range(len(mesh_data.vertices))) - set(loose_vertices)
+        for layer_index, uv_layer in enumerate(mesh_data.uv_layers):
+            vertex_to_uv = {}
+            conflicting_vertices = set()
+
+            for polygon in mesh_data.polygons:
+                for vertex_index, loop_index in zip(polygon.vertices, polygon.loop_indices):
+                    uv = uv_layer.data[loop_index].uv
+                    uv_pair = (float(uv.x), float(uv.y))
+                    previous_uv = vertex_to_uv.get(vertex_index)
+                    if previous_uv is None:
+                        vertex_to_uv[vertex_index] = uv_pair
+                        continue
+
+                    if (
+                        abs(previous_uv[0] - uv_pair[0]) > tolerance
+                        or abs(previous_uv[1] - uv_pair[1]) > tolerance
+                    ):
+                        conflicting_vertices.add(vertex_index)
+
+            missing_used_vertices = sorted(vertex for vertex in used_vertices if vertex not in vertex_to_uv)
+            if missing_used_vertices:
+                lines.append(
+                    f"ERROR: UV-Layer {layer_index} hat benutzte Vertices ohne UV. "
+                    f"Vertex-Indizes: {_format_index_preview(missing_used_vertices)}"
+                )
+            else:
+                lines.append(f"OK: UV-Layer {layer_index} deckt alle benutzten Vertices ab.")
+
+            if conflicting_vertices:
+                lines.append(
+                    f"WARN: UV-Layer {layer_index} hat Vertex->UV-Konflikte an Seams. "
+                    "Der Exporter speichert nur einen UV-Wert pro Vertex. "
+                    f"Vertex-Indizes: {_format_index_preview(sorted(conflicting_vertices))}"
+                )
+            else:
+                lines.append(f"OK: UV-Layer {layer_index} hat keine Vertex->UV-Konflikte.")
+
+    return lines, loose_vertices
+
+
+def _mesh_validation_icon(line):
+    if line.startswith("OK:"):
+        return 'CHECKMARK'
+    if line.startswith("ERROR:"):
+        return 'CANCEL'
+    if line.startswith("WARN:"):
+        return 'ERROR'
+    return 'INFO'
+
+
+class GEOMETRY_OT_validate_selected_mesh(Operator):
+    bl_idname = "geometry_tools.validate_selected_mesh"
+    bl_label = "Validate Selected Mesh"
+    bl_description = "Prüft das aktive Mesh auf Export-Probleme bei UVs, Triangles und BinMesh-Daten"
+
+    def execute(self, context):
+        mesh_object = context.active_object
+        if mesh_object is None or mesh_object.type != "MESH" or mesh_object.data is None:
+            self.report({"ERROR"}, "Kein aktives Mesh ausgewählt.")
+            return {'CANCELLED'}
+
+        lines, loose_vertices = _validate_selected_mesh_lines(context, mesh_object)
+        context.scene.s5_mesh_validation_report = "\n".join(lines)
+        context.scene.s5_mesh_validation_loose_indices = ",".join(str(index) for index in loose_vertices)
+
+        has_error = any(line.startswith("ERROR:") for line in lines)
+        has_warning = any(line.startswith("WARN:") for line in lines)
+        if has_error:
+            self.report({"WARNING"}, "Mesh-Check abgeschlossen: Fehler gefunden. Details im Mesh Validation Panel.")
+        elif has_warning:
+            self.report({"INFO"}, "Mesh-Check abgeschlossen: Warnungen gefunden. Details im Mesh Validation Panel.")
+        else:
+            self.report({"INFO"}, "Mesh-Check abgeschlossen: Keine Probleme gefunden.")
+
+        return {'FINISHED'}
+
+
+class GEOMETRY_OT_delete_loose_vertices(Operator):
+    bl_idname = "geometry_tools.delete_loose_vertices"
+    bl_label = "Delete Loose Vertices"
+    bl_description = "Löscht unbenutzte Vertices im aktiven Mesh"
+
+    def execute(self, context):
+        mesh_object = context.active_object
+        if mesh_object is None or mesh_object.type != "MESH" or mesh_object.data is None:
+            self.report({"ERROR"}, "Kein aktives Mesh ausgewählt.")
+            return {'CANCELLED'}
+
+        mesh_data = mesh_object.data
+        loose_indices = _collect_loose_vertex_indices(mesh_object)
+        if not loose_indices:
+            context.scene.s5_mesh_validation_loose_indices = ""
+            self.report({"INFO"}, "Keine losen Vertices gefunden.")
+            return {'CANCELLED'}
+
+        if mesh_object.mode == 'EDIT':
+            bm = bmesh.from_edit_mesh(mesh_data)
+            bm.verts.ensure_lookup_table()
+            verts_to_delete = [bm.verts[index] for index in loose_indices if index < len(bm.verts)]
+            bmesh.ops.delete(bm, geom=verts_to_delete, context='VERTS')
+            bmesh.update_edit_mesh(mesh_data)
+        else:
+            bm = bmesh.new()
+            bm.from_mesh(mesh_data)
+            bm.verts.ensure_lookup_table()
+            verts_to_delete = [bm.verts[index] for index in loose_indices if index < len(bm.verts)]
+            bmesh.ops.delete(bm, geom=verts_to_delete, context='VERTS')
+            bm.to_mesh(mesh_data)
+            bm.free()
+            mesh_data.update()
+
+        lines, remaining_loose_vertices = _validate_selected_mesh_lines(context, mesh_object)
+        context.scene.s5_mesh_validation_report = "\n".join(lines)
+        context.scene.s5_mesh_validation_loose_indices = ",".join(str(index) for index in remaining_loose_vertices)
+        self.report({"INFO"}, f"{len(loose_indices)} lose Vertices gelöscht.")
+        return {'FINISHED'}
+
+
+class GEOMETRY_PT_mesh_validation(Panel):
+    bl_idname = "VIEW3D_PT_geometry_mesh_validation"
+    bl_label = "Mesh Validation"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Geometry Tools'
+
+    def draw(self, context):
+        layout = self.layout
+        layout.operator(GEOMETRY_OT_validate_selected_mesh.bl_idname, icon='CHECKMARK')
+
+        loose_indices = getattr(context.scene, "s5_mesh_validation_loose_indices", "")
+        if loose_indices:
+            layout.operator(GEOMETRY_OT_delete_loose_vertices.bl_idname, icon='X')
+
+        report = getattr(context.scene, "s5_mesh_validation_report", "")
+        if not report:
+            layout.label(text="Noch kein Report vorhanden.")
+            return
+
+        box = layout.box()
+        for line in report.splitlines():
+            box.label(text=line, icon=_mesh_validation_icon(line))
+
+
 # ---------------------------------------------- Delete Scene Button --------------------------------------------
 # ---------------------------------------------------------------------------------------------------------------
 
@@ -858,6 +1070,9 @@ CLASSES = (
     GEOMETRY_OT_reset_entries,
     GEOMETRY_OT_add_material,
     GEOMETRY_OT_remove_material,
+    GEOMETRY_OT_validate_selected_mesh,
+    GEOMETRY_OT_delete_loose_vertices,
+    GEOMETRY_PT_mesh_validation,
 
     SCENE_OT_clear_all,
     SCENE_PT_tools,
@@ -950,6 +1165,14 @@ def register():
 
     bpy.types.Scene.geometry_tool_items = CollectionProperty(type=GeometryExportRecord)
     bpy.types.Scene.geometry_tool_index = IntProperty(default=0)
+    bpy.types.Scene.s5_mesh_validation_report = StringProperty(
+        name="Mesh Validation Report",
+        default="",
+    )
+    bpy.types.Scene.s5_mesh_validation_loose_indices = StringProperty(
+        name="Loose Vertex Indices",
+        default="",
+    )
 
     bpy.types.Action.s5_anim_fps = StringProperty(name="FPS", default=str(DEFAULT_S5_FPS))
     bpy.types.Action.s5_anim_format = EnumProperty(
@@ -981,7 +1204,7 @@ def unregister():
     _LAST_ACTION_BY_OBJECT = {}
 
     # Scene Properties entfernen
-    for attr in ("bone_items","bone_active_index","particle_effects","particle_effects_index","geometry_tool_items","geometry_tool_index"):
+    for attr in ("bone_items","bone_active_index","particle_effects","particle_effects_index","geometry_tool_items","geometry_tool_index","s5_mesh_validation_report","s5_mesh_validation_loose_indices"):
         if hasattr(bpy.types.Scene, attr):
             delattr(bpy.types.Scene, attr)
 

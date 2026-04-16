@@ -921,7 +921,93 @@ def build_default_user_data(node_id, bone_type_data):
     return None
 
 
-def build_frame_extension(frame_index, node_id, user_data, bone_type_data, hanim_data):
+def _build_building_hanim_hierarchy(node_ids, hierarchy, export_order):
+    frame_index_by_node_id = {}
+    for frame_index, node_id in enumerate(node_ids):
+        if node_id == -1 or node_id in frame_index_by_node_id:
+            continue
+        frame_index_by_node_id[node_id] = frame_index
+
+    ordered_frame_indices = []
+    seen_frames = set()
+
+    for node_id in export_order:
+        if node_id == -1:
+            continue
+        frame_index = frame_index_by_node_id.get(node_id)
+        if frame_index is None or frame_index in seen_frames:
+            continue
+        ordered_frame_indices.append(frame_index)
+        seen_frames.add(frame_index)
+
+    for frame_index, node_id in enumerate(node_ids):
+        if node_id == -1 or frame_index in seen_frames:
+            continue
+        ordered_frame_indices.append(frame_index)
+        seen_frames.add(frame_index)
+
+    node_index_by_frame = {
+        frame_index: node_index
+        for node_index, frame_index in enumerate(ordered_frame_indices)
+    }
+
+    children = {}
+    for frame_index in ordered_frame_indices:
+        children[frame_index] = []
+
+    for frame_index in ordered_frame_indices:
+        parent_frame_index = hierarchy[frame_index]
+        if parent_frame_index in node_index_by_frame:
+            children[parent_frame_index].append(frame_index)
+
+    nodes = []
+    parents = []
+
+    for frame_index in ordered_frame_indices:
+        parent_frame_index = hierarchy[frame_index]
+        sibling_frames = children.get(parent_frame_index, [])
+        parents.append(node_index_by_frame.get(parent_frame_index, -1))
+        nodes.append({
+            "flags": {
+                "HasChildren": len(children.get(frame_index, [])) > 0,
+                "LastSibling": True if not sibling_frames else sibling_frames[-1] == frame_index,
+            },
+            "nodeID": node_ids[frame_index],
+            "nodeIndex": node_index_by_frame[frame_index],
+        })
+
+    return nodes, parents
+
+
+def _find_building_hanim_root_frame(node_ids, hierarchy, export_order):
+    ordered_frame_indices = []
+    seen_frames = set()
+
+    for node_id in export_order:
+        if node_id == -1:
+            continue
+        for frame_index, current_node_id in enumerate(node_ids):
+            if current_node_id == node_id and frame_index not in seen_frames:
+                ordered_frame_indices.append(frame_index)
+                seen_frames.add(frame_index)
+                break
+
+    for frame_index, node_id in enumerate(node_ids):
+        if node_id == -1 or frame_index in seen_frames:
+            continue
+        ordered_frame_indices.append(frame_index)
+        seen_frames.add(frame_index)
+
+    valid_frame_indices = set(ordered_frame_indices)
+    for frame_index in ordered_frame_indices:
+        parent_frame_index = hierarchy[frame_index]
+        if parent_frame_index not in valid_frame_indices:
+            return frame_index
+
+    return ordered_frame_indices[0] if ordered_frame_indices else 0
+
+
+def build_frame_extension(frame_index, node_id, user_data, bone_type_data, hanim_data, root_frame_index, hanim_nodes, hanim_parents):
     extension = OrderedDict()
 
     resolved_user_data = user_data or build_default_user_data(node_id, bone_type_data)
@@ -947,17 +1033,11 @@ def build_frame_extension(frame_index, node_id, user_data, bone_type_data, hanim
                 "ReBuildNodesArray": False,
             }
 
-    if frame_index == 1 and hanim_data is None:
-        extension["hanimPLG"]["nodes"] = []
-        extension["hanimPLG"]["flags"] = {
-            "SubHierarchy": False,
-            "NoMatrices": False,
-            "UpdateModellingMatrices": False,
-            "UpdateLTMs": False,
-            "LocalSpaceMatrices": False,
-        }
+    if frame_index == root_frame_index and "hanimPLG" in extension:
+        extension["hanimPLG"]["nodes"] = hanim_nodes
+        extension["hanimPLG"]["parents"] = hanim_parents
         extension["hanimPLG"]["keyFrameSize"] = 36
-        extension["hanimPLG"]["ReBuildNodesArray"] = True
+        extension["hanimPLG"]["ReBuildNodesArray"] = False
 
     return extension
 
@@ -966,6 +1046,8 @@ def build_building_frame_entries(bone_names_sorted, hierarchy, rest_matrices, us
     print("build_building_frame_entries")
     node_ids = [bone_name_to_node_id(bone_name) for bone_name in bone_names_sorted]
     export_order = determine_export_order(node_ids, hierarchy)
+    hanim_nodes, hanim_parents = _build_building_hanim_hierarchy(node_ids, hierarchy, export_order)
+    root_frame_index = _find_building_hanim_root_frame(node_ids, hierarchy, export_order)
 
     print(f"Bone names sorted: {bone_names_sorted}")
     print(f"Export order: {export_order}")
@@ -996,6 +1078,9 @@ def build_building_frame_entries(bone_names_sorted, hierarchy, rest_matrices, us
             user_data_entries[frame_index],
             bone_type_data,
             hanim_data_entries[frame_index],
+            root_frame_index,
+            hanim_nodes,
+            hanim_parents,
         )
         frame_entries.append(frame_entry)
 
@@ -1311,13 +1396,49 @@ def convert_binary_dff_to_json(binary_data, converter_path):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    stdout, _stderr = process.communicate(input=binary_data)
+    stdout, stderr = process.communicate(input=binary_data)
+    stderr_text = stderr.decode("utf-8", "replace").strip()
+    if process.returncode != 0:
+        raise RuntimeError(f"S5Converter import failed with exit code {process.returncode}: {stderr_text or 'no stderr output'}")
+    if stderr_text:
+        raise RuntimeError(f"S5Converter import reported an error: {stderr_text}")
     return json.loads(stdout.decode("utf-8"))
+
+
+def _collect_invalid_texture_coordinate_entries(payload):
+    invalid_entries = []
+    clump = payload.get("clump") if isinstance(payload, dict) else None
+    geometries = clump.get("geometries", []) if isinstance(clump, dict) else []
+
+    for geometry_index, geometry in enumerate(geometries):
+        texture_layers = geometry.get("textureCoordinates", [])
+        for layer_index, layer in enumerate(texture_layers):
+            if not isinstance(layer, list):
+                invalid_entries.append((geometry_index, layer_index, None, type(layer).__name__))
+                continue
+
+            for coord_index, uv in enumerate(layer):
+                if not isinstance(uv, dict) or "u" not in uv or "v" not in uv:
+                    invalid_entries.append((geometry_index, layer_index, coord_index, uv))
+
+    return invalid_entries
 
 
 def convert_json_to_binary_dff(payload, converter_path):
     if not os.path.isfile(converter_path):
         raise FileNotFoundError(f"S5Converter.exe nicht gefunden: {converter_path}")
+
+    invalid_entries = _collect_invalid_texture_coordinate_entries(payload)
+    if invalid_entries:
+        preview = ", ".join(
+            f"geom {geometry_index}, layer {layer_index}, index {coord_index}: {value!r}"
+            for geometry_index, layer_index, coord_index, value in invalid_entries[:8]
+        )
+        raise RuntimeError(
+            "JSON enthält ungültige textureCoordinates-Einträge. "
+            "Erwartet wird pro UV ein Objekt mit 'u' und 'v'. "
+            f"Beispiele: {preview}"
+        )
 
     process = subprocess.Popen(
         [converter_path, "--export"],
@@ -1326,7 +1447,14 @@ def convert_json_to_binary_dff(payload, converter_path):
         stderr=subprocess.PIPE,
     )
     payload_bytes = json.dumps(payload).encode("utf-8")
-    stdout, _stderr = process.communicate(input=payload_bytes)
+    stdout, stderr = process.communicate(input=payload_bytes)
+    stderr_text = stderr.decode("utf-8", "replace").strip()
+    if process.returncode != 0:
+        raise RuntimeError(f"S5Converter export failed with exit code {process.returncode}: {stderr_text or 'no stderr output'}")
+    if stderr_text:
+        raise RuntimeError(f"S5Converter export reported an error: {stderr_text}")
+    if not stdout:
+        raise RuntimeError("S5Converter export lieferte keine DFF-Daten (0 Bytes stdout).")
     return stdout
 
 
