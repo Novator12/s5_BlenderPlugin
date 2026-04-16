@@ -5,7 +5,7 @@
 bl_info = {
     "name": "Novator12 DFF Plugin Blender v5",
     "author": "Novator12",
-    "version": (1, 1, 0),
+    "version": (2, 0, 0),
     "blender": (5, 0, 0),
     "location": "File > Import-Export + View3D Sidebar",
     "description": "Import/Export fuer starre Gebaeude und Gebaeude-Animationen (Settlers 5) inkl. UserData/Particle/Geometry Tools",
@@ -32,10 +32,9 @@ from .building_anm_export import BuildingAnmExportOperator
 from .building_anm_import import BuildingAnmImportOperator
 from .unit_anm_export import UnitAnmExportOperator
 from .unit_anm_import import UnitAnmImportOperator
-from .building_utilities import (
+from .utilities import (
     ACTION_ANIM_FPS_PROP,
     ACTION_ANIM_FORMAT_PROP,
-    ACTION_EXPORT_NAME_PROP,
     ACTION_START_PREV_KEYFRAME_PROP,
     ANIM_FORMAT_COMPRESSED,
     ANIM_FORMAT_HIERARCHICAL,
@@ -43,7 +42,6 @@ from .building_utilities import (
     DEFAULT_S5_FPS,
     DEFAULT_ANIM_FORMAT,
     DEFAULT_START_PREV_KEYFRAME,
-    ensure_action_anim_fps,
     ensure_action_anim_format,
     ensure_action_stashed_in_muted_nla,
     parse_action_anim_fps,
@@ -55,6 +53,7 @@ from .building_model_export import (
 )
 from .unit_model_export import (
     UnitExportOperator,
+    write_unit_model,
 )
 from .building_model_import import (
     BuildingImportOperator,
@@ -88,8 +87,6 @@ def export_building_model_state(path, bone_type_data, particle_data, geometry_da
 
 
 def export_unit_model_state(path, context):
-    from .unit_utilities import write_unit_model
-
     write_unit_model(path, context)
 
 
@@ -1219,6 +1216,3 @@ def unregister():
 
 if __name__ == "__main__":
     register()
-
-
-
