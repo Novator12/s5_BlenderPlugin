@@ -7,9 +7,7 @@ from bpy.props import StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ImportHelper
 
-from .building_anm_export import collect_anim_bones_for_building, collect_animation_bones_from_hanim, resolve_export_root_id
-from .utilities import (
-    convert_anm_to_json_external,
+from .Comfort.anim_utils import (
     create_import_action,
     determine_fps,
     ensure_armature_active,
@@ -23,6 +21,8 @@ from .utilities import (
     set_scene_frame,
     store_imported_animation_metadata,
 )
+from .building_anm_export import collect_anim_bones_for_building, collect_animation_bones_from_hanim, resolve_export_root_id
+from .Comfort.io_utils import convert_anm_to_json_external
 
 
 def parse_animation_json(json_path: str) -> tuple[float, list[list[dict]], str]:

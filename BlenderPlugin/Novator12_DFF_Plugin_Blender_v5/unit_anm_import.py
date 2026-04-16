@@ -8,9 +8,7 @@ from bpy.props import StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ImportHelper
 
-from .unit_anm_export import collect_unit_animation_bones, resolve_unit_animation_root_id
-from .utilities import (
-    convert_anm_to_json_external,
+from .Comfort.anim_utils import (
     create_import_action,
     determine_fps,
     ensure_armature_active,
@@ -24,6 +22,8 @@ from .utilities import (
     set_scene_frame,
     store_imported_animation_metadata,
 )
+from .Comfort.io_utils import convert_anm_to_json_external
+from .unit_anm_export import collect_unit_animation_bones, resolve_unit_animation_root_id
 
 
 def _build_matrix_from_compressed_key(key: dict, offset: dict, scalar: dict) -> mu.Matrix:

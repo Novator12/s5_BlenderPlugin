@@ -8,18 +8,34 @@ from bpy.props import StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ImportHelper
 
-from .utilities import (
+from .Comfort.constants import (
+    ATOMIC_EXTENSION_PROP,
+    ATOMIC_FRAME_INDEX_PROP,
+    BONE_NAME_PADDING,
+    GEOMETRY_USER_DATA_PROP,
+    MATERIAL_AMBIENT_PROP,
+    MATERIAL_DIFFUSE_PROP,
+    MATERIAL_DUAL_TEX_PROP,
+    MATERIAL_PAYLOAD_PROP,
+    MATERIAL_SPECULAR_PROP,
+    MATERIAL_SPEC_TEXTURE_PROP,
+    MESH_SPHERE_NAME_PROP,
+    ROOT_HANIM_NODES_PROP,
+    ROOT_HANIM_PARENTS_PROP,
+    SPHERE_LINKED_MESH_PROP,
+    TEXTURE_ALPHA_PROP,
+    TEXTURE_NAME_PROP,
+    UNIT_BONE_DISPLAY_LENGTH,
+)
+from .Comfort.io_utils import load_building_model_payload
+from .Comfort.transform_utils import (
     frame_dict_to_matrix,
     get_converter_exe_location,
     link_object_in_active_collection,
-    load_building_model_payload,
     matrix_to_bone_axis_roll,
     set_clipping_for_all_screens,
 )
 
-
-BONE_NAME_PADDING = 3
-BONE_DISPLAY_LENGTH = 10.0
 WEIGHT_EPSILON = 1.0e-6
 
 
@@ -124,7 +140,7 @@ def build_unit_armature_from_frames(frame_containers, use_connect):
         bone_axis, bone_roll = matrix_to_bone_axis_roll(world_matrix.to_3x3())
 
         edit_bone.head = world_matrix.to_translation()
-        edit_bone.tail = edit_bone.head + bone_axis * BONE_DISPLAY_LENGTH
+        edit_bone.tail = edit_bone.head + bone_axis * UNIT_BONE_DISPLAY_LENGTH
         edit_bone.roll = bone_roll
 
         parent_index = hierarchy[frame_index]
@@ -144,9 +160,9 @@ def build_unit_armature_from_frames(frame_containers, use_connect):
     armature.show_names = True
     armature_object.show_in_front = True
     if root_hanim_nodes is not None:
-        armature_object["s5_root_hanim_nodes"] = json.dumps(root_hanim_nodes)
+        armature_object[ROOT_HANIM_NODES_PROP] = json.dumps(root_hanim_nodes)
     if root_hanim_parents is not None:
-        armature_object["s5_root_hanim_parents"] = json.dumps(root_hanim_parents)
+        armature_object[ROOT_HANIM_PARENTS_PROP] = json.dumps(root_hanim_parents)
     return armature_object, bone_names, node_index_to_frame_index
 
 
@@ -225,19 +241,19 @@ def _assign_unit_materials(mesh_object, geometry_data, mesh_index):
             material_name = "UnitMaterial{:02d}_{:02d}".format(mesh_index, material_index)
         _ensure_material_slot(mesh_object.data, material_name)
         material = mesh_object.data.materials[-1]
-        material["s5_material_payload"] = json.dumps(material_data)
-        material["s5_texture_name"] = material_name
-        material["s5_texture_alpha"] = textures[0].get("textureAlpha", "") if textures else ""
+        material[MATERIAL_PAYLOAD_PROP] = json.dumps(material_data)
+        material[TEXTURE_NAME_PROP] = material_name
+        material[TEXTURE_ALPHA_PROP] = textures[0].get("textureAlpha", "") if textures else ""
 
         surface_props = material_data.get("SurfaceProps", {})
-        material["s5_ambient"] = int(surface_props.get("ambient", 1))
-        material["s5_specular"] = int(surface_props.get("specular", 0))
-        material["s5_diffuse"] = int(surface_props.get("diffuse", 1))
+        material[MATERIAL_AMBIENT_PROP] = int(surface_props.get("ambient", 1))
+        material[MATERIAL_SPECULAR_PROP] = int(surface_props.get("specular", 0))
+        material[MATERIAL_DIFFUSE_PROP] = int(surface_props.get("diffuse", 1))
 
         material_fx = material_data.get("extension", {}).get("MaterialFXMat", {}).get("Data1", {})
-        material["s5_dual_tex"] = material_fx.get("Type", "") == "DualTexture"
+        material[MATERIAL_DUAL_TEX_PROP] = material_fx.get("Type", "") == "DualTexture"
         texture_1 = material_fx.get("Texture1") or {}
-        material["s5_spec_texture"] = texture_1.get("texture", "")
+        material[MATERIAL_SPEC_TEXTURE_PROP] = texture_1.get("texture", "")
 
 
 def _determine_unit_mesh_name(unit_name, mesh_index, mesh_count):
@@ -359,8 +375,8 @@ def _create_selection_sphere(mesh_object, sphere_data):
     sphere_object.display_type = "WIRE"
     sphere_object.hide_render = True
 
-    mesh_object["sphere_name"] = sphere_object.name
-    sphere_object["linked_mesh"] = mesh_object.name
+    mesh_object[MESH_SPHERE_NAME_PROP] = sphere_object.name
+    sphere_object[SPHERE_LINKED_MESH_PROP] = mesh_object.name
     sphere_object["s5_sphere_type"] = "SelectionSphere"
 
 
@@ -390,13 +406,13 @@ def import_unit_clump(js, unit_name, use_connect=False):
             mesh_name,
             mesh_index,
         )
-        mesh_object["s5_atomic_frame_index"] = int(atomic_entry.get("frameIndex", 0))
-        mesh_object["s5_atomic_extension"] = json.dumps(atomic_entry.get("extension", {}))
+        mesh_object[ATOMIC_FRAME_INDEX_PROP] = int(atomic_entry.get("frameIndex", 0))
+        mesh_object[ATOMIC_EXTENSION_PROP] = json.dumps(atomic_entry.get("extension", {}))
         mesh_object["s5_bin_mesh_plg"] = json.dumps(geometry_data.get("extension", {}).get("BinMeshPLG", {}))
         mesh_object["s5_triangles"] = json.dumps(geometry_data.get("triangles", []))
         mesh_object["s5_skin_plg"] = json.dumps(geometry_data.get("extension", {}).get("SkinPLG", {}))
         if "userDataPLG" in geometry_data.get("extension", {}):
-            mesh_object["s5_geometry_user_data"] = json.dumps(geometry_data["extension"].get("userDataPLG"))
+            mesh_object[GEOMETRY_USER_DATA_PROP] = json.dumps(geometry_data["extension"].get("userDataPLG"))
 
     return armature_object
 

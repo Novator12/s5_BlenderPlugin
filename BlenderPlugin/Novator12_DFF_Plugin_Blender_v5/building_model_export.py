@@ -10,15 +10,15 @@ from bpy.props import EnumProperty, StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ExportHelper
 
+from .Comfort.io_utils import save_building_model_payload
+from .Comfort.mesh_utils import build_geometry_format, collect_texture_coordinates
 from .particle_effects_data import PARTICLE_EFFECT_LUT
-from .utilities import (
-    _build_geometry_format,
-    _collect_texture_coordinates,
+from .Comfort.transform_utils import (
     bone_name_to_node_id,
     edit_bone_to_matrix,
     get_converter_exe_location,
-    save_building_model_payload,
 )
+from .Comfort.validation_utils import raise_for_export_preflight
 
 
 def vector_to_js_triplet(vector):
@@ -288,8 +288,8 @@ def build_building_geometry_payload(mesh_object, inverse_rest_matrix, geometry_m
         morph_target["sphere"] = sphere
 
     payload["morphTargets"] = [morph_target]
-    payload["textureCoordinates"] = _collect_texture_coordinates(mesh_object, vertex_count)
-    payload["format"] = _build_geometry_format(mesh_object, payload["textureCoordinates"])
+    payload["textureCoordinates"] = collect_texture_coordinates(mesh_object, vertex_count)
+    payload["format"] = build_geometry_format(mesh_object, payload["textureCoordinates"])
     payload["extension"] = {"BinMeshPLG": _build_bin_mesh_extension(metadata_entry)}
     payload["triangles"] = _collect_triangles(mesh_object)
     payload["materials"] = _build_material_payloads(mesh_object, metadata_entry)
@@ -775,6 +775,7 @@ def write_building_model(path, bone_type_data, particle_data, geometry_data, ato
         atomic_material_fx_data,
         particle_data_map,
     )
+    raise_for_export_preflight(payload, "Building export preflight failed")
     save_building_model_payload(path, payload, converter_path)
 
 

@@ -8,12 +8,10 @@ from bpy.props import EnumProperty, StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ExportHelper
 
-from .utilities import (
-    DEFAULT_S5_FPS,
+from .Comfort.anim_utils import (
     build_converter_track_for_bone,
     collect_armature_actions,
     collect_keyed_frames_for_bone,
-    convert_json_to_anm_external,
     ensure_action_anim_fps,
     ensure_action_export_name,
     ensure_armature_active,
@@ -26,20 +24,16 @@ from .utilities import (
     root_id_from_filename,
     vec_to_s5_json,
 )
+from .Comfort.constants import DEFAULT_S5_FPS, ROOT_HANIM_NODES_PROP, ROOT_HANIM_PARENTS_PROP
+from .Comfort.io_utils import convert_json_to_anm_external
+from .Comfort.json_utils import json_loads_or_default
 
 
 def _load_unit_root_hanim_payload(arm_ob):
-    try:
-        nodes = json.loads(arm_ob.get("s5_root_hanim_nodes", "null"))
-    except Exception:
-        nodes = None
-
-    try:
-        parents = json.loads(arm_ob.get("s5_root_hanim_parents", "null"))
-    except Exception:
-        parents = None
-
-    return nodes, parents
+    return (
+        json_loads_or_default(arm_ob.get(ROOT_HANIM_NODES_PROP, "null"), None),
+        json_loads_or_default(arm_ob.get(ROOT_HANIM_PARENTS_PROP, "null"), None),
+    )
 
 
 def determine_unit_bone_names_sorted(armature_object):

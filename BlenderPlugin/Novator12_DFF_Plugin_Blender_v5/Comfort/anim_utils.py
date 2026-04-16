@@ -1,303 +1,29 @@
-import json
 import math
 import os
 import re
-import subprocess
-
-from collections import OrderedDict
 
 import bpy
 import mathutils as mu
-from mathutils import Matrix, Vector
 
-
-NEGATIVE_Y_THRESHOLD = 1.0e-9
-NEGATIVE_Y_CLOSE_THRESHOLD = 1.0e-5
-FALLBACK_BONE_AXIS = Vector((0.0, 1.0, 0.0))
-EXPORT_BONE_SCALE = 100.0
-
-DEFAULT_S5_FPS = 30
-MIN_ANIM_NODE_ID = 600
-DEFAULT_START_PREV_KEYFRAME = -123456789
-ACTION_ANIM_FPS_PROP = "s5_anim_fps"
-ACTION_EXPORT_NAME_PROP = "s5_export_name"
-ACTION_START_PREV_KEYFRAME_PROP = "s5_import_prev_keyframe"
-ACTION_ANIM_FORMAT_PROP = "s5_anim_format"
-ANIM_FORMAT_HIERARCHICAL = "hierarchical"
-ANIM_FORMAT_COMPRESSED = "compressed"
-ANIM_FORMAT_NODES = "nodes"
-DEFAULT_ANIM_FORMAT = ANIM_FORMAT_HIERARCHICAL
-
-
-def get_converter_exe_location():
-    addon_dir = os.path.dirname(__file__)
-    return os.path.join(addon_dir, "S5Converter.exe")
-
-
-def set_clipping_for_all_screens(clip_start, clip_end):
-    for screen in bpy.data.screens:
-        for area in screen.areas:
-            for space in area.spaces:
-                if hasattr(space, "clip_start") and hasattr(space, "clip_end"):
-                    space.clip_start = clip_start
-                    space.clip_end = clip_end
-
-
-def compose_matrix(left, right):
-    return left @ right
-
-
-def frame_dict_to_matrix(frame_data):
-    rotation_rows = frame_data["rotationMatrix"]
-    position = frame_data["position"]
-
-    matrix = Matrix.Identity(4)
-    for row_index, row in enumerate(rotation_rows):
-        matrix[row_index][0] = row["x"]
-        matrix[row_index][1] = row["y"]
-        matrix[row_index][2] = row["z"]
-
-    matrix[3][0] = position["x"]
-    matrix[3][1] = position["y"]
-    matrix[3][2] = position["z"]
-    return matrix
-
-
-def bone_axis_to_matrix(axis, roll):
-    normalized_axis = axis.normalized()
-    orientation = Matrix().to_3x3()
-    theta = 1.0 + normalized_axis.y
-
-    if theta > NEGATIVE_Y_CLOSE_THRESHOLD or ((normalized_axis.x or normalized_axis.z) and theta > NEGATIVE_Y_THRESHOLD):
-        orientation[1][0] = -normalized_axis.x
-        orientation[0][1] = normalized_axis.x
-        orientation[1][1] = normalized_axis.y
-        orientation[2][1] = normalized_axis.z
-        orientation[1][2] = -normalized_axis.z
-
-        if theta > NEGATIVE_Y_CLOSE_THRESHOLD:
-            orientation[0][0] = 1.0 - normalized_axis.x * normalized_axis.x / theta
-            orientation[2][2] = 1.0 - normalized_axis.z * normalized_axis.z / theta
-            orientation[0][2] = -normalized_axis.x * normalized_axis.z / theta
-            orientation[2][0] = orientation[0][2]
-        else:
-            denominator = normalized_axis.x * normalized_axis.x + normalized_axis.z * normalized_axis.z
-            orientation[0][0] = (normalized_axis.x + normalized_axis.z) * (normalized_axis.x - normalized_axis.z) / -denominator
-            orientation[2][2] = -orientation[0][0]
-            orientation[0][2] = 2.0 * normalized_axis.x * normalized_axis.z / denominator
-            orientation[2][0] = orientation[0][2]
-    else:
-        orientation[0][0] = -1.0
-        orientation[1][1] = -1.0
-
-    roll_matrix = mu.Matrix.Rotation(roll, 3, normalized_axis)
-    return compose_matrix(roll_matrix, orientation)
-
-
-def matrix_to_bone_axis_roll(matrix):
-    axis = matrix.col[1]
-    if axis.length < 1.0e-8:
-        return FALLBACK_BONE_AXIS.copy(), 0.0
-
-    axis_matrix = bone_axis_to_matrix(axis, 0.0)
-    try:
-        inverse_axis_matrix = axis_matrix.inverted()
-    except Exception:
-        return FALLBACK_BONE_AXIS.copy(), 0.0
-
-    roll_matrix = compose_matrix(inverse_axis_matrix, matrix)
-    roll = math.atan2(roll_matrix[0][2], roll_matrix[2][2])
-    return axis, roll
-
-
-def link_object_in_active_collection(obj):
-    bpy.context.collection.objects.link(obj)
-    bpy.context.view_layer.objects.active = obj
-
-
-def edit_bone_to_matrix(edit_bone):
-    head_position = edit_bone.head
-    tail_axis = (edit_bone.tail - head_position) / EXPORT_BONE_SCALE
-    orientation_matrix = bone_axis_to_matrix(tail_axis, edit_bone.roll)
-
-    transform_matrix = orientation_matrix.to_4x4()
-    transform_matrix.translation = head_position
-    return transform_matrix
-
-
-def bone_name_to_node_id(bone_name):
-    node_suffix = bone_name[10:]
-    return int(node_suffix) if node_suffix else -1
-
-
-def _collect_texture_coordinates(mesh_object, vertex_count):
-    texture_coordinate_sets = []
-    for uv_layer in mesh_object.data.uv_layers:
-        layer_coordinates = [None] * vertex_count
-        has_uvs = False
-
-        for polygon in mesh_object.data.polygons:
-            for vertex_index, loop_index in zip(polygon.vertices, polygon.loop_indices):
-                uv = uv_layer.data[loop_index].uv
-                layer_coordinates[vertex_index] = OrderedDict((
-                    ("u", uv.x),
-                    ("v", 1 - uv.y),
-                ))
-                has_uvs = True
-
-        if has_uvs:
-            texture_coordinate_sets.append(layer_coordinates)
-
-    return texture_coordinate_sets
-
-
-def _build_geometry_format(mesh_object, texture_coordinate_sets):
-    if not texture_coordinate_sets:
-        return {
-            "TriStrip": False,
-            "Positions": False,
-            "NumTextureCoordinates": 0,
-            "PreLit": False,
-            "Normals": False,
-            "Light": False,
-            "ModulateMaterialColor": False,
-            "Native": False,
-            "NativeInstance": False,
-        }
-
-    return {
-        "TriStrip": True,
-        "Positions": True,
-        "NumTextureCoordinates": 2 if len(mesh_object.data.uv_layers) > 1 else 1,
-        "PreLit": False,
-        "Normals": True,
-        "Light": True,
-        "ModulateMaterialColor": False,
-        "Native": False,
-        "NativeInstance": False,
-    }
-
-
-def accumulate_rest_matrix(rest_matrices, hierarchy, frame_index):
-    accumulated_matrix = rest_matrices[frame_index]
-    parent_index = hierarchy[frame_index]
-    visited = set()
-
-    while parent_index != -1 and parent_index not in visited:
-        visited.add(parent_index)
-        accumulated_matrix = rest_matrices[parent_index] @ accumulated_matrix
-        parent_index = hierarchy[parent_index]
-
-    return accumulated_matrix
-
-
-def convert_binary_dff_to_json(binary_data, converter_path):
-    if not os.path.isfile(converter_path):
-        raise FileNotFoundError(f"S5Converter.exe nicht gefunden: {converter_path}")
-
-    process = subprocess.Popen(
-        [converter_path, "--import"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    stdout, stderr = process.communicate(input=binary_data)
-    stderr_text = stderr.decode("utf-8", "replace").strip()
-    if process.returncode != 0:
-        raise RuntimeError(f"S5Converter import failed with exit code {process.returncode}: {stderr_text or 'no stderr output'}")
-    if stderr_text:
-        raise RuntimeError(f"S5Converter import reported an error: {stderr_text}")
-    return json.loads(stdout.decode("utf-8"))
-
-
-def _collect_invalid_texture_coordinate_entries(payload):
-    invalid_entries = []
-    clump = payload.get("clump") if isinstance(payload, dict) else None
-    geometries = clump.get("geometries", []) if isinstance(clump, dict) else []
-
-    for geometry_index, geometry in enumerate(geometries):
-        texture_layers = geometry.get("textureCoordinates", [])
-        for layer_index, layer in enumerate(texture_layers):
-            if not isinstance(layer, list):
-                invalid_entries.append((geometry_index, layer_index, None, type(layer).__name__))
-                continue
-
-            for coord_index, uv in enumerate(layer):
-                if not isinstance(uv, dict) or "u" not in uv or "v" not in uv:
-                    invalid_entries.append((geometry_index, layer_index, coord_index, uv))
-
-    return invalid_entries
-
-
-def convert_json_to_binary_dff(payload, converter_path):
-    if not os.path.isfile(converter_path):
-        raise FileNotFoundError(f"S5Converter.exe nicht gefunden: {converter_path}")
-
-    invalid_entries = _collect_invalid_texture_coordinate_entries(payload)
-    if invalid_entries:
-        preview = ", ".join(
-            f"geom {geometry_index}, layer {layer_index}, index {coord_index}: {value!r}"
-            for geometry_index, layer_index, coord_index, value in invalid_entries[:8]
-        )
-        raise RuntimeError(
-            "JSON enthaelt ungueltige textureCoordinates-Eintraege. "
-            "Erwartet wird pro UV ein Objekt mit 'u' und 'v'. "
-            f"Beispiele: {preview}"
-        )
-
-    process = subprocess.Popen(
-        [converter_path, "--export"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    payload_bytes = json.dumps(payload).encode("utf-8")
-    stdout, stderr = process.communicate(input=payload_bytes)
-    stderr_text = stderr.decode("utf-8", "replace").strip()
-    if process.returncode != 0:
-        raise RuntimeError(f"S5Converter export failed with exit code {process.returncode}: {stderr_text or 'no stderr output'}")
-    if stderr_text:
-        raise RuntimeError(f"S5Converter export reported an error: {stderr_text}")
-    if not stdout:
-        raise RuntimeError("S5Converter export lieferte keine DFF-Daten (0 Bytes stdout).")
-    return stdout
-
-
-def load_building_model_payload(path, converter_path):
-    if path.endswith(".dff"):
-        with open(path, "rb") as handle:
-            return convert_binary_dff_to_json(handle.read(), converter_path)
-
-    with open(path, "r", encoding="utf-8") as handle:
-        return json.load(handle)
-
-
-def save_building_model_payload(path, payload, converter_path):
-    if path.endswith(".json"):
-        with open(path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=4)
-        return
-
-    binary_payload = convert_json_to_binary_dff(payload, converter_path)
-    with open(path, "wb") as handle:
-        handle.write(binary_payload)
+from .constants import (
+    ACTION_ANIM_FPS_PROP,
+    ACTION_ANIM_FORMAT_PROP,
+    ACTION_EXPORT_NAME_PROP,
+    ACTION_START_PREV_KEYFRAME_PROP,
+    ANIM_FORMAT_COMPRESSED,
+    ANIM_FORMAT_HIERARCHICAL,
+    ANIM_FORMAT_NODES,
+    DEFAULT_ANIM_FORMAT,
+    DEFAULT_S5_FPS,
+    DEFAULT_START_PREV_KEYFRAME,
+    MIN_ANIM_NODE_ID,
+)
 
 
 def is_building_anim_node_id(node_id: int | None) -> bool:
     if node_id is None:
         return False
     return 500 <= int(node_id) < 600 or int(node_id) >= MIN_ANIM_NODE_ID
-
-
-def safe_decode_console(data: bytes) -> str:
-    if not data:
-        return ""
-    for encoding in ("utf-8", "cp1252", "latin-1"):
-        try:
-            return data.decode(encoding)
-        except UnicodeDecodeError:
-            pass
-    return data.decode("latin-1", errors="replace")
 
 
 def ensure_armature_active() -> bpy.types.Object:
@@ -466,7 +192,6 @@ def parse_hierarchical_anim_tracks(js: dict) -> tuple[float, list[list[dict]]]:
 
     starts = []
     by_prev = {}
-
     for index, key in enumerate(keyframes):
         prev = int(key.get("PrevKeyFrame", -1))
         time_value = float(key.get("Time", 0.0))
@@ -524,14 +249,12 @@ def extract_start_prev_keyframe_value(js: dict) -> int | None:
     if not hierarchical_anim:
         return None
 
-    keyframes = hierarchical_anim.get("KeyFrames", [])
-    for key in keyframes:
+    for key in hierarchical_anim.get("KeyFrames", []):
         try:
             time_value = float(key.get("Time", 0.0))
             prev_value = int(key.get("PrevKeyFrame"))
         except Exception:
             continue
-
         if time_value == 0.0 and prev_value < 0:
             return prev_value
 
@@ -550,12 +273,10 @@ def get_bone_rest_local_matrix(arm_ob: bpy.types.Object, bone_name: str) -> mu.M
 
 def posebone_set_from_local_matrix(arm_ob: bpy.types.Object, pb: bpy.types.PoseBone, local_anim_mtx: mu.Matrix):
     rest_local = get_bone_rest_local_matrix(arm_ob, pb.name)
-
     try:
         basis_matrix = rest_local.inverted() @ local_anim_mtx
     except Exception:
         basis_matrix = local_anim_mtx
-
     pb.matrix_basis = basis_matrix
 
 
@@ -606,31 +327,26 @@ def parse_int_string_value(value, error_message: str) -> int:
     text = str(value).strip()
     if not text:
         raise ValueError(error_message)
-
     if text[0] in "+-":
         sign = text[0]
         digits = text[1:]
         if not digits.isdigit():
             raise ValueError(error_message)
         return int(sign + digits)
-
     if not text.isdigit():
         raise ValueError(error_message)
-
     return int(text)
 
 
 def parse_action_anim_fps(action: bpy.types.Action | None, fallback: int = DEFAULT_S5_FPS) -> int:
     if action is None:
         return sanitize_anim_fps_value(fallback, fallback)
-
     return max(1, parse_int_string_value(getattr(action, ACTION_ANIM_FPS_PROP, fallback), "FPS-Input is no integer value"))
 
 
 def parse_action_start_prev_keyframe(action: bpy.types.Action | None, fallback: int = DEFAULT_START_PREV_KEYFRAME) -> int:
     if action is None:
         return int(fallback)
-
     return parse_int_string_value(
         getattr(action, ACTION_START_PREV_KEYFRAME_PROP, fallback),
         "Start-Prev-Keyframe is no integer value",
@@ -690,7 +406,6 @@ def build_unique_action_name(base_name: str) -> str:
     candidate = base_name or "Animation"
     if bpy.data.actions.get(candidate) is None:
         return candidate
-
     suffix = 1
     while bpy.data.actions.get(f"{candidate}.{suffix:03d}") is not None:
         suffix += 1
@@ -729,7 +444,6 @@ def stash_active_action_in_muted_nla(arm_ob: bpy.types.Object):
     active_action = animation_data.action
     if active_action is None:
         return None
-
     return ensure_action_stashed_in_muted_nla(arm_ob, active_action, clear_active=True)
 
 
@@ -788,7 +502,6 @@ def restore_action_after_export(arm_ob: bpy.types.Object, original_action, origi
     animation_data = getattr(arm_ob, "animation_data", None)
     if animation_data is None:
         return
-
     animation_data.action = original_action
     for track, mute_state in zip(animation_data.nla_tracks, original_track_mutes):
         track.mute = mute_state
@@ -831,39 +544,22 @@ def resolve_start_prev_keyframe_value(
 
 
 def quat_to_converter_json(q: mu.Quaternion) -> dict:
-    return {
-        "w": float(q.w),
-        "x": float(q.x),
-        "y": float(q.y),
-        "z": float(q.z),
-    }
+    return {"w": float(q.w), "x": float(q.x), "y": float(q.y), "z": float(q.z)}
 
 
 def vec_to_converter_json(v: mu.Vector) -> dict:
-    return {
-        "x": float(v.x),
-        "y": float(v.y),
-        "z": float(v.z),
-    }
+    return {"x": float(v.x), "y": float(v.y), "z": float(v.z)}
 
 
 def quat_to_s5_json(q: mu.Quaternion) -> dict:
     return {
         "Real": float(q.w),
-        "Imaginary": {
-            "x": float(q.x),
-            "y": float(q.y),
-            "z": float(q.z),
-        },
+        "Imaginary": {"x": float(q.x), "y": float(q.y), "z": float(q.z)},
     }
 
 
 def vec_to_s5_json(v: mu.Vector) -> dict:
-    return {
-        "x": float(v.x),
-        "y": float(v.y),
-        "z": float(v.z),
-    }
+    return {"x": float(v.x), "y": float(v.y), "z": float(v.z)}
 
 
 def get_posebone_local_anim_matrix(arm_ob: bpy.types.Object, pb: bpy.types.PoseBone) -> mu.Matrix:
@@ -871,12 +567,7 @@ def get_posebone_local_anim_matrix(arm_ob: bpy.types.Object, pb: bpy.types.PoseB
     return rest_local @ pb.matrix_basis.copy()
 
 
-def collect_keyed_frames_for_bone(
-    action: bpy.types.Action,
-    bone_name: str,
-    frame_start: float,
-    frame_end: float,
-) -> list[float]:
+def collect_keyed_frames_for_bone(action: bpy.types.Action, bone_name: str, frame_start: float, frame_end: float) -> list[float]:
     prefix = f'pose.bones["{bone_name}"].'
     frames = set()
     fcurves = []
@@ -944,7 +635,6 @@ def build_converter_track_for_bone(
 
     track = []
     pose_bone.rotation_mode = "QUATERNION"
-
     for frame in frames:
         set_scene_frame(scene, frame)
         bpy.context.view_layer.update()
@@ -960,127 +650,3 @@ def build_converter_track_for_bone(
         })
 
     return track
-
-
-def convert_anm_to_json_external(anm_path: str) -> dict:
-    exe = get_converter_exe_location()
-    if not os.path.isfile(exe):
-        raise FileNotFoundError(f"S5Converter.exe nicht gefunden: {exe}")
-
-    with open(anm_path, "rb") as handle:
-        binary_data = handle.read()
-
-    process = subprocess.Popen(
-        [exe, "--import"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    outs, errs = process.communicate(input=binary_data)
-
-    stdout_text = safe_decode_console(outs)
-    stderr_text = safe_decode_console(errs)
-
-    if stderr_text:
-        print("[S5Converter stderr]")
-        print(stderr_text)
-
-    if process.returncode != 0:
-        raise RuntimeError(f"S5Converter Fehler:\n{stderr_text}")
-
-    try:
-        return json.loads(stdout_text)
-    except Exception as exc:
-        raise RuntimeError(f"S5Converter lieferte kein gueltiges JSON zurueck: {exc}")
-
-
-def convert_json_to_anm_external(js: dict, anm_path: str):
-    if anm_path.endswith(".json"):
-        with open(anm_path, "w", encoding="utf-8") as outfile:
-            json.dump(js, outfile, indent=4)
-        return
-
-    exe = get_converter_exe_location()
-    if not os.path.isfile(exe):
-        raise FileNotFoundError(f"S5Converter.exe nicht gefunden: {exe}")
-
-    process = subprocess.Popen(
-        [exe, "--export"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    bytes_data = json.dumps(js).encode("utf-8")
-    outs, errs = process.communicate(input=bytes_data)
-
-    stderr_text = safe_decode_console(errs)
-    if stderr_text:
-        print("[S5Converter stderr]")
-        print(stderr_text)
-
-    try:
-        with open(anm_path, "wb") as outfile:
-            outfile.write(outs)
-    except BrokenPipeError as exc:
-        print("[ERROR] BrokenPipe beim Schreiben in Datei {}: {}".format(anm_path, exc))
-
-
-__all__ = [
-    "ACTION_ANIM_FPS_PROP",
-    "ACTION_ANIM_FORMAT_PROP",
-    "ACTION_EXPORT_NAME_PROP",
-    "ACTION_START_PREV_KEYFRAME_PROP",
-    "ANIM_FORMAT_COMPRESSED",
-    "ANIM_FORMAT_HIERARCHICAL",
-    "ANIM_FORMAT_NODES",
-    "DEFAULT_ANIM_FORMAT",
-    "DEFAULT_S5_FPS",
-    "DEFAULT_START_PREV_KEYFRAME",
-    "_build_geometry_format",
-    "_collect_texture_coordinates",
-    "accumulate_rest_matrix",
-    "bone_name_to_node_id",
-    "build_converter_track_for_bone",
-    "build_matrix_from_s5_key",
-    "collect_armature_actions",
-    "collect_keyed_frames_for_bone",
-    "convert_anm_to_json_external",
-    "convert_json_to_anm_external",
-    "create_import_action",
-    "determine_fps",
-    "edit_bone_to_matrix",
-    "ensure_action_anim_fps",
-    "ensure_action_anim_format",
-    "ensure_action_export_name",
-    "ensure_action_stashed_in_muted_nla",
-    "ensure_armature_active",
-    "find_bone_by_node_id",
-    "frame_dict_to_matrix",
-    "get_action_anim_fps",
-    "get_converter_exe_location",
-    "get_posebone_local_anim_matrix",
-    "insert_posebone_keys",
-    "isolate_action_for_export",
-    "link_object_in_active_collection",
-    "load_building_model_payload",
-    "matrix_to_bone_axis_roll",
-    "parse_action_anim_fps",
-    "parse_action_start_prev_keyframe",
-    "parse_animation_data",
-    "parse_converter_nodes",
-    "posebone_set_from_local_matrix",
-    "quat_to_s5_json",
-    "resolve_start_prev_keyframe_value",
-    "restore_action_after_export",
-    "root_id_from_filename",
-    "s5_quat_to_blender",
-    "s5_time_to_frame",
-    "s5_vec_to_blender",
-    "save_building_model_payload",
-    "set_action_anim_format",
-    "set_action_anim_fps",
-    "set_clipping_for_all_screens",
-    "set_scene_frame",
-    "store_imported_animation_metadata",
-    "vec_to_s5_json",
-]

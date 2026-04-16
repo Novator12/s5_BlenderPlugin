@@ -9,33 +9,18 @@ from bpy.props import StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ImportHelper
 
-from .utilities import (
+from .Comfort.constants import BONE_NAME_PADDING, BUILDING_BONE_DISPLAY_LENGTH
+from .Comfort.io_utils import load_building_model_payload
+from .particle_effects_data import PARTICLE_EFFECT_LUT
+from .Comfort.transform_utils import (
     frame_dict_to_matrix,
     get_converter_exe_location,
     link_object_in_active_collection,
-    load_building_model_payload,
     matrix_to_bone_axis_roll,
     set_clipping_for_all_screens,
 )
 
-
-BONE_NAME_PADDING = 3
-BONE_DISPLAY_LENGTH = 100.0
-KNOWN_PARTICLE_EFFECTS = {
-    "smoke10",
-    "fire02",
-    "woodchip",
-    "PB_Weathermachine_lightning",
-    "sulfur_spray",
-    "salimTrapIcon",
-    "TMP_resourceGold_Sparkle",
-    "XD_StoneSparkles",
-    "smoke11",
-    "XF_Leaves",
-    "smoke12",
-    "fire01",
-    "firewheel",
-}
+KNOWN_PARTICLE_EFFECTS = set(PARTICLE_EFFECT_LUT)
 
 
 def _assign_active_object_material(material_name):
@@ -149,7 +134,7 @@ def build_armature_from_frames(frame_containers, use_connect):
         bone_axis, bone_roll = matrix_to_bone_axis_roll(world_matrix.to_3x3())
 
         edit_bone.head = world_matrix.to_translation()
-        edit_bone.tail = edit_bone.head + bone_axis * BONE_DISPLAY_LENGTH
+        edit_bone.tail = edit_bone.head + bone_axis * BUILDING_BONE_DISPLAY_LENGTH
         edit_bone.roll = bone_roll
 
         parent_index = hierarchy[frame_index]

@@ -9,15 +9,31 @@ from bpy.props import EnumProperty, StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ExportHelper
 
-from .utilities import (
-    _build_geometry_format,
-    _collect_texture_coordinates,
+from .Comfort.constants import (
+    ATOMIC_EXTENSION_PROP,
+    ATOMIC_FRAME_INDEX_PROP,
+    GEOMETRY_USER_DATA_PROP,
+    MATERIAL_AMBIENT_PROP,
+    MATERIAL_DIFFUSE_PROP,
+    MATERIAL_DUAL_TEX_PROP,
+    MATERIAL_PAYLOAD_PROP,
+    MATERIAL_SPECULAR_PROP,
+    MATERIAL_SPEC_TEXTURE_PROP,
+    ROOT_HANIM_NODES_PROP,
+    ROOT_HANIM_PARENTS_PROP,
+    TEXTURE_ALPHA_PROP,
+    TEXTURE_NAME_PROP,
+)
+from .Comfort.io_utils import save_building_model_payload
+from .Comfort.json_utils import json_loads_or_default
+from .Comfort.mesh_utils import build_geometry_format, collect_texture_coordinates
+from .Comfort.transform_utils import (
     accumulate_rest_matrix,
     bone_name_to_node_id,
     edit_bone_to_matrix,
     get_converter_exe_location,
-    save_building_model_payload,
 )
+from .Comfort.validation_utils import raise_for_export_preflight
 
 
 def resolve_unit_armature_for_export(context):
@@ -80,8 +96,8 @@ def collect_unit_armature_export_state(armature_object):
             "rest_matrices": rest_matrices,
             "hanim_data_entries": hanim_data_entries,
             "node_ids": node_ids,
-            "root_hanim_nodes": json.loads(armature_object.get("s5_root_hanim_nodes", "null")),
-            "root_hanim_parents": json.loads(armature_object.get("s5_root_hanim_parents", "null")),
+            "root_hanim_nodes": json_loads_or_default(armature_object.get(ROOT_HANIM_NODES_PROP, "null"), None),
+            "root_hanim_parents": json_loads_or_default(armature_object.get(ROOT_HANIM_PARENTS_PROP, "null"), None),
         }
     finally:
         bpy.ops.object.mode_set(mode="OBJECT")
@@ -300,7 +316,7 @@ def _build_unit_material_payloads(mesh_object):
         if material is None:
             continue
 
-        raw_template = material.get("s5_material_payload")
+        raw_template = material.get(MATERIAL_PAYLOAD_PROP)
         if raw_template:
             try:
                 material_payload = json.loads(raw_template, object_pairs_hook=OrderedDict)
@@ -314,18 +330,18 @@ def _build_unit_material_payloads(mesh_object):
         material_payload["UnknownInt1"] = 0
         material_payload["UnknownInt2"] = 237627844
         material_payload["SurfaceProps"] = {
-            "ambient": int(_material_prop(material, "s5_ambient", 1)),
-            "specular": int(_material_prop(material, "s5_specular", 0)),
-            "diffuse": int(_material_prop(material, "s5_diffuse", 1)),
+            "ambient": int(_material_prop(material, MATERIAL_AMBIENT_PROP, 1)),
+            "specular": int(_material_prop(material, MATERIAL_SPECULAR_PROP, 0)),
+            "diffuse": int(_material_prop(material, MATERIAL_DIFFUSE_PROP, 1)),
         }
 
         extension = OrderedDict()
-        if bool(_material_prop(material, "s5_dual_tex", False)):
+        if bool(_material_prop(material, MATERIAL_DUAL_TEX_PROP, False)):
             extension["MaterialFXMat"] = {
                 "Data1": {
                     "Type": "DualTexture",
                     "Texture1": {
-                        "texture": _material_prop(material, "s5_spec_texture", ""),
+                        "texture": _material_prop(material, MATERIAL_SPEC_TEXTURE_PROP, ""),
                         "TexPadding": [0],
                         "textureAlpha": "",
                         "TextureAlphaPadding": [0, 116, 28, 196],
@@ -357,8 +373,8 @@ def _build_unit_material_payloads(mesh_object):
         material_payload["extension"] = extension
 
         texture = OrderedDict()
-        texture_name = _material_prop(material, "s5_texture_name", material.name)
-        texture_alpha = _material_prop(material, "s5_texture_alpha", "")
+        texture_name = _material_prop(material, TEXTURE_NAME_PROP, material.name)
+        texture_alpha = _material_prop(material, TEXTURE_ALPHA_PROP, "")
         texture["texture"] = texture_name
         texture["textureAlpha"] = texture_alpha
         texture["FilterAddressing"] = {
@@ -469,8 +485,8 @@ def build_unit_geometry_payload(mesh_object, bone_names_sorted, frame_index_to_n
         morph_target["sphere"] = sphere
 
     payload["morphTargets"] = [morph_target]
-    payload["textureCoordinates"] = _collect_texture_coordinates(mesh_object, vertex_count)
-    payload["format"] = _build_geometry_format(mesh_object, payload["textureCoordinates"])
+    payload["textureCoordinates"] = collect_texture_coordinates(mesh_object, vertex_count)
+    payload["format"] = build_geometry_format(mesh_object, payload["textureCoordinates"])
     payload["triangles"] = _collect_unit_triangles(mesh_object)
     payload["materials"] = _build_unit_material_payloads(mesh_object)
     try:
@@ -494,9 +510,9 @@ def build_unit_geometry_payload(mesh_object, bone_names_sorted, frame_index_to_n
             hierarchy,
         ),
     }
-    if "s5_geometry_user_data" in mesh_object:
+    if GEOMETRY_USER_DATA_PROP in mesh_object:
         try:
-            extension_payload["userDataPLG"] = json.loads(mesh_object["s5_geometry_user_data"])
+            extension_payload["userDataPLG"] = json.loads(mesh_object[GEOMETRY_USER_DATA_PROP])
         except Exception:
             pass
 
@@ -506,7 +522,7 @@ def build_unit_geometry_payload(mesh_object, bone_names_sorted, frame_index_to_n
 
 def build_unit_atomic_entry(mesh_object, geometry_index):
     atomic_entry = OrderedDict()
-    atomic_entry["frameIndex"] = int(mesh_object.get("s5_atomic_frame_index", 0))
+    atomic_entry["frameIndex"] = int(mesh_object.get(ATOMIC_FRAME_INDEX_PROP, 0))
     atomic_entry["geometryIndex"] = geometry_index
     atomic_entry["Flags"] = {
         "CollisionTest": True,
@@ -515,7 +531,7 @@ def build_unit_atomic_entry(mesh_object, geometry_index):
     }
     atomic_entry["UnknownInt1"] = 0
     try:
-        atomic_entry["extension"] = json.loads(mesh_object.get("s5_atomic_extension", "null")) or {}
+        atomic_entry["extension"] = json_loads_or_default(mesh_object.get(ATOMIC_EXTENSION_PROP, "null"), {})
     except Exception:
         atomic_entry["extension"] = {}
     return atomic_entry
@@ -582,6 +598,7 @@ def _ensure_filepath_extension(filepath, extension):
 def write_unit_model(path, context):
     converter_path = get_converter_exe_location()
     payload = build_unit_export_json(context)
+    raise_for_export_preflight(payload, "Unit export preflight failed")
     save_building_model_payload(path, payload, converter_path)
 
 

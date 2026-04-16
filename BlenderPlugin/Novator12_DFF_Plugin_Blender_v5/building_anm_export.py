@@ -9,12 +9,10 @@ from bpy.props import EnumProperty, StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ExportHelper
 
-from .utilities import (
-    DEFAULT_S5_FPS,
+from .Comfort.anim_utils import (
     build_converter_track_for_bone,
     collect_armature_actions,
     collect_keyed_frames_for_bone,
-    convert_json_to_anm_external,
     ensure_action_export_name,
     ensure_armature_active,
     find_bone_by_node_id,
@@ -25,6 +23,8 @@ from .utilities import (
     restore_action_after_export,
     vec_to_s5_json,
 )
+from .Comfort.constants import DEFAULT_S5_FPS
+from .Comfort.io_utils import convert_json_to_anm_external
 
 
 MIN_ANIM_NODE_ID = 600
