@@ -297,9 +297,11 @@ def _attach_sphere_proxy(geometry_data, mesh_object, empty_geometry):
         bpy.ops.object.mode_set(mode="EDIT")
 
 
-def _write_geometry_tool_metadata(scene, geometry_data, mesh_name, empty_geometry):
+def _write_geometry_tool_metadata(scene, geometry_data, mesh_object, empty_geometry):
     geometry_entry = scene.geometry_tool_items.add()
-    geometry_entry.mesh_name = mesh_name
+    geometry_entry.mesh_name = mesh_object.name
+    geometry_entry.mesh_object = mesh_object
+    geometry_entry.linked_to_object = True
     geometry_entry.materials.clear()
 
     if empty_geometry:
@@ -357,7 +359,7 @@ def build_building_geometry(geometry_data, armature_object, frame_rest_matrix, b
         mesh_index,
     )
     _attach_sphere_proxy(geometry_data, mesh_object, empty_geometry)
-    _write_geometry_tool_metadata(bpy.context.scene, geometry_data, mesh_name, empty_geometry)
+    _write_geometry_tool_metadata(bpy.context.scene, geometry_data, mesh_object, empty_geometry)
     return mesh_index + 1
 
 

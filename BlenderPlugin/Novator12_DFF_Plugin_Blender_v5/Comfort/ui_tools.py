@@ -3,6 +3,7 @@ import bpy
 
 from mathutils import Vector
 
+from bpy.app.handlers import persistent
 from bpy.props import IntProperty
 from bpy.types import Operator, Panel, UIList
 
@@ -19,6 +20,143 @@ from .validation_utils import (
     mesh_validation_icon,
     validate_mesh_object,
 )
+
+_GEOMETRY_TOOL_SYNC_LOCK = False
+
+
+def _initialize_empty_geometry_entry(entry):
+    if not entry.mesh_name or entry.mesh_name == "No data":
+        entry.mesh_name = "Empty-Geometry"
+
+    entry.bin_mesh_data = "Empty-Geometry"
+    entry.materials.clear()
+
+    material_entry = entry.materials.add()
+    material_entry.name = "Empty-Geometry"
+    material_entry.ambient = False
+    material_entry.specular = False
+    material_entry.diffuse = False
+    material_entry.uv_trans = False
+    material_entry.dual_tex = False
+    material_entry.snow_texture = "Empty-Geometry"
+    material_entry.texture_alpha = ""
+
+
+def _resolve_geometry_entry_object(entry):
+    mesh_object = getattr(entry, "mesh_object", None)
+    if mesh_object is None:
+        return None
+
+    try:
+        mesh_name = mesh_object.name
+    except ReferenceError:
+        return None
+
+    return bpy.data.objects.get(mesh_name)
+
+
+def sync_geometry_tool_selection(scene, context):
+    if _GEOMETRY_TOOL_SYNC_LOCK or context is None:
+        return
+
+    index = getattr(scene, "geometry_tool_index", -1)
+    if index < 0 or index >= len(scene.geometry_tool_items):
+        return
+
+    mesh_object = _resolve_geometry_entry_object(scene.geometry_tool_items[index])
+    if mesh_object is None or mesh_object.type != "MESH":
+        return
+
+    view_layer = getattr(context, "view_layer", None)
+    if view_layer is None:
+        return
+
+    active_object = view_layer.objects.active
+    if active_object is not None and active_object.mode != "OBJECT" and bpy.ops.object.mode_set.poll():
+        try:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        except Exception:
+            pass
+
+    try:
+        if mesh_object.hide_get():
+            mesh_object.hide_set(False)
+    except Exception:
+        pass
+
+    if getattr(mesh_object, "hide_viewport", False):
+        mesh_object.hide_viewport = False
+
+    for selected_object in list(getattr(context, "selected_objects", [])):
+        if selected_object != mesh_object:
+            try:
+                selected_object.select_set(False)
+            except Exception:
+                pass
+
+    try:
+        mesh_object.select_set(True)
+    except Exception:
+        return
+
+    try:
+        view_layer.objects.active = mesh_object
+    except Exception:
+        pass
+
+
+@persistent
+def sync_geometry_tool_entries(scene=None):
+    global _GEOMETRY_TOOL_SYNC_LOCK
+
+    context = bpy.context
+    scene = scene or getattr(context, "scene", None)
+    if scene is None or not hasattr(scene, "geometry_tool_items") or _GEOMETRY_TOOL_SYNC_LOCK:
+        return
+
+    changed = False
+    removed_active_entry = False
+    removed_before_active = 0
+    active_index = getattr(scene, "geometry_tool_index", 0)
+
+    _GEOMETRY_TOOL_SYNC_LOCK = True
+    try:
+        for index in range(len(scene.geometry_tool_items) - 1, -1, -1):
+            entry = scene.geometry_tool_items[index]
+            mesh_object = _resolve_geometry_entry_object(entry)
+
+            if getattr(entry, "linked_to_object", False):
+                if mesh_object is None or mesh_object.type != "MESH":
+                    scene.geometry_tool_items.remove(index)
+                    changed = True
+                    if index == active_index:
+                        removed_active_entry = True
+                    elif index < active_index:
+                        removed_before_active += 1
+                    continue
+
+                if entry.mesh_name != mesh_object.name:
+                    entry.mesh_name = mesh_object.name
+                    changed = True
+    finally:
+        _GEOMETRY_TOOL_SYNC_LOCK = False
+
+    if not changed:
+        return
+
+    item_count = len(scene.geometry_tool_items)
+    if item_count == 0:
+        scene.geometry_tool_index = 0
+        return
+
+    next_active_index = max(0, active_index - removed_before_active)
+    if removed_active_entry or next_active_index >= item_count:
+        next_active_index = min(next_active_index, item_count - 1)
+
+    if next_active_index != getattr(scene, "geometry_tool_index", -1):
+        scene.geometry_tool_index = next_active_index
+
+    sync_geometry_tool_selection(scene, context)
 
 
 class BoneMappingList(UIList):
@@ -228,7 +366,13 @@ class GEOMETRY_UL_tool_entries(UIList):
 
         box_main = layout.box()
         box_main.label(text=" Geometry {} --------------------------------------------------------------------------------------------------------------------------------------------------".format(index + 1))
-        box_main.prop(item, "mesh_name", text="Mesh")
+        box_main.prop(item, "mesh_object", text="Object")
+        row = box_main.row()
+        row.enabled = not item.linked_to_object
+        row.prop(item, "mesh_name", text="Mesh")
+        row = box_main.row()
+        row.enabled = not item.linked_to_object
+        row.prop(item, "bone_index", text="Bone Index")
 
         for idx, mat in enumerate(item.materials):
             mat_box = box_main.box()
@@ -267,6 +411,7 @@ class GEOMETRY_PT_tools(Panel):
     def draw(self, context):
         layout = self.layout
         layout.label(text="Geometry Data:")
+        layout.label(text="Empty Geometry: Object leer lassen und Bone Index setzen.")
         scene = context.scene
 
         layout.template_list("GEOMETRY_UL_tool_entries", "", scene, "geometry_tool_items", scene, "geometry_tool_index")
@@ -282,7 +427,14 @@ class GEOMETRY_OT_add_entry(Operator):
     bl_label = "Add Geometry Entry"
 
     def execute(self, context):
-        context.scene.geometry_tool_items.add()
+        geometry_entry = context.scene.geometry_tool_items.add()
+        mesh_object = context.active_object
+        if mesh_object is not None and mesh_object.type == "MESH":
+            geometry_entry.mesh_name = mesh_object.name
+            geometry_entry.mesh_object = mesh_object
+            geometry_entry.linked_to_object = True
+        else:
+            _initialize_empty_geometry_entry(geometry_entry)
         context.scene.geometry_tool_index = len(context.scene.geometry_tool_items) - 1
         return {"FINISHED"}
 

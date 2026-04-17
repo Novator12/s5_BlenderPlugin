@@ -15,7 +15,8 @@ EXPORT_BONE_SCALE = 100.0
 
 
 def get_converter_exe_location():
-    addon_dir = os.path.dirname(__file__)
+    comfort_dir = os.path.dirname(__file__)
+    addon_dir = os.path.dirname(comfort_dir)
     return os.path.join(addon_dir, CONVERTER_EXE_NAME)
 
 

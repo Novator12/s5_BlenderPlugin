@@ -110,7 +110,7 @@ def _build_bin_mesh_extension(metadata_entry):
     default_flags = {"UnIndexed": False, "Type": "TriStrip"}
     raw_bin_mesh = metadata_entry.get("bin_mesh_data", "No data") if metadata_entry else "No data"
 
-    if raw_bin_mesh and raw_bin_mesh != "No data":
+    if raw_bin_mesh and raw_bin_mesh not in {"No data", "Empty-Geometry"}:
         try:
             parsed = json.loads(raw_bin_mesh)
             return {
@@ -151,6 +151,44 @@ def _find_geometry_metadata(mesh_object, geometry_metadata):
 
     print(f"[WARN] Kein Geometry-Eintrag für Mesh '{mesh_object.name}' gefunden.")
     return None
+
+
+def _geometry_metadata_from_entry(entry):
+    return {
+        "materials": getattr(entry, "materials", []),
+        "bin_mesh_data": getattr(entry, "bin_mesh_data", "No data"),
+    }
+
+
+def _mesh_belongs_to_armature(mesh_object, armature_object):
+    return (
+        mesh_object is not None
+        and mesh_object.type == "MESH"
+        and any(mod.type == "ARMATURE" and mod.object == armature_object for mod in mesh_object.modifiers)
+    )
+
+
+def _resolve_geometry_entry_mesh_object(entry, armature_object=None):
+    mesh_object = getattr(entry, "mesh_object", None)
+    linked_to_object = bool(getattr(entry, "linked_to_object", False))
+
+    if mesh_object is not None:
+        try:
+            mesh_object = bpy.data.objects.get(mesh_object.name)
+        except ReferenceError:
+            mesh_object = None
+
+    if mesh_object is None and not (not linked_to_object and str(_entry_value(entry, "bone_index", "")).strip()):
+        mesh_name = _entry_value(entry, "mesh_name", "")
+        if mesh_name:
+            candidate = bpy.data.objects.get(mesh_name)
+            if candidate is not None:
+                mesh_object = candidate
+
+    if armature_object is not None and not _mesh_belongs_to_armature(mesh_object, armature_object):
+        return None
+
+    return mesh_object
 
 
 def _build_material_fx_extension(material_entry):
@@ -293,6 +331,27 @@ def build_building_geometry_payload(mesh_object, inverse_rest_matrix, geometry_m
     payload["extension"] = {"BinMeshPLG": _build_bin_mesh_extension(metadata_entry)}
     payload["triangles"] = _collect_triangles(mesh_object)
     payload["materials"] = _build_material_payloads(mesh_object, metadata_entry)
+    return payload
+
+
+def build_empty_building_geometry_payload(geometry_metadata):
+    payload = OrderedDict()
+    payload["morphTargets"] = [OrderedDict()]
+    payload["textureCoordinates"] = []
+    payload["format"] = {
+        "TriStrip": False,
+        "Positions": False,
+        "NumTextureCoordinates": 0,
+        "PreLit": False,
+        "Normals": False,
+        "Light": False,
+        "ModulateMaterialColor": False,
+        "Native": False,
+        "NativeInstance": False,
+    }
+    payload["extension"] = {"BinMeshPLG": _build_bin_mesh_extension(None)}
+    payload["triangles"] = []
+    payload["materials"] = []
     return payload
 
 
@@ -652,6 +711,43 @@ def collect_meshes_for_armature(armature_object):
     )
 
 
+def collect_geometry_export_targets(scene, armature_object):
+    ordered_meshes = collect_meshes_for_armature(armature_object)
+    targets = []
+    seen_mesh_names = set()
+
+    if scene is not None and hasattr(scene, "geometry_tool_items"):
+        for entry in scene.geometry_tool_items:
+            mesh_object = _resolve_geometry_entry_mesh_object(entry, armature_object)
+            if mesh_object is not None:
+                if mesh_object.name in seen_mesh_names:
+                    continue
+                seen_mesh_names.add(mesh_object.name)
+                targets.append({"kind": "mesh", "mesh_object": mesh_object})
+                continue
+
+            targets.append({"kind": "empty", "entry": entry})
+
+    for mesh_object in ordered_meshes:
+        if mesh_object.name in seen_mesh_names:
+            continue
+        targets.append({"kind": "mesh", "mesh_object": mesh_object})
+
+    return targets
+
+
+def resolve_empty_geometry_frame_index(entry, bone_names_sorted):
+    bone_index_raw = str(_entry_value(entry, "bone_index", "")).strip()
+    if bone_index_raw.isdigit():
+        frame_index = int(bone_index_raw)
+        if 0 <= frame_index < len(bone_names_sorted):
+            return frame_index
+
+    mesh_name = _entry_value(entry, "mesh_name", "Empty-Geometry")
+    print(f"[WARN] Empty Geometry '{mesh_name}' uebersprungen: ungueltiger Bone Index '{bone_index_raw}'.")
+    return -1
+
+
 def accumulate_rest_matrix(rest_matrices, hierarchy, frame_index):
     accumulated_matrix = rest_matrices[frame_index]
     parent_index = hierarchy[frame_index]
@@ -692,21 +788,36 @@ def build_building_export_json(
     clump["atomics"] = []
     clump["geometries"] = []
 
-    for geometry_index, mesh_object in enumerate(collect_meshes_for_armature(armature_object)):
-        if not mesh_object.vertex_groups:
-            print(f"[WARN] Mesh ohne Vertex Group übersprungen: {mesh_object.name}")
-            continue
+    scene = getattr(context, "scene", None)
+    for target in collect_geometry_export_targets(scene, armature_object):
+        geometry_index = len(clump["geometries"])
 
-        bone_name = mesh_object.vertex_groups[0].name
-        frame_index = get_bone_index_by_name(bone_names_sorted, bone_name)
-        if frame_index == -1:
-            print(f"[WARN] Bone not found for mesh: {mesh_object.name}")
-            continue
+        if target["kind"] == "mesh":
+            mesh_object = target["mesh_object"]
+            if not mesh_object.vertex_groups:
+                print(f"[WARN] Mesh ohne Vertex Group uebersprungen: {mesh_object.name}")
+                continue
 
-        frame_rest_matrix = accumulate_rest_matrix(rest_matrices, hierarchy, frame_index)
-        clump["geometries"].append(
-            build_building_geometry_payload(mesh_object, frame_rest_matrix.inverted(), geometry_data)
-        )
+            bone_name = mesh_object.vertex_groups[0].name
+            frame_index = get_bone_index_by_name(bone_names_sorted, bone_name)
+            if frame_index == -1:
+                print(f"[WARN] Bone not found for mesh: {mesh_object.name}")
+                continue
+
+            frame_rest_matrix = accumulate_rest_matrix(rest_matrices, hierarchy, frame_index)
+            clump["geometries"].append(
+                build_building_geometry_payload(mesh_object, frame_rest_matrix.inverted(), geometry_data)
+            )
+        else:
+            entry = target["entry"]
+            frame_index = resolve_empty_geometry_frame_index(entry, bone_names_sorted)
+            if frame_index == -1:
+                continue
+
+            clump["geometries"].append(
+                build_empty_building_geometry_payload(_geometry_metadata_from_entry(entry))
+            )
+
         clump["atomics"].append(
             build_building_atomic_entry(
                 frame_index,
@@ -733,7 +844,7 @@ def collect_building_scene_export_payload(scene):
     ] or None
 
     geometry_data = {
-        geo.mesh_name: {
+        _geometry_entry_mesh_name(geo): {
             "materials": [
                 {
                     "name": mat.name,
@@ -753,6 +864,22 @@ def collect_building_scene_export_payload(scene):
     } or None
 
     return bone_type_data, particle_data, geometry_data
+
+
+def _geometry_entry_mesh_name(geometry_entry):
+    mesh_name = geometry_entry.mesh_name
+    mesh_object = getattr(geometry_entry, "mesh_object", None)
+
+    if not getattr(geometry_entry, "linked_to_object", False) or mesh_object is None:
+        return mesh_name
+
+    try:
+        if mesh_object.type == "MESH":
+            return mesh_object.name
+    except ReferenceError:
+        pass
+
+    return mesh_name
 
 
 def build_building_export_payload(bone_type_data, particle_data, geometry_data, atomic_material_fx_data, particle_data_map):

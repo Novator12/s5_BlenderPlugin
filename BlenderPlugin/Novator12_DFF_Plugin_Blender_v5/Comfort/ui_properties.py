@@ -1,4 +1,6 @@
-from bpy.props import BoolProperty, CollectionProperty, EnumProperty, StringProperty
+import bpy
+
+from bpy.props import BoolProperty, CollectionProperty, EnumProperty, PointerProperty, StringProperty
 from bpy.types import PropertyGroup
 
 from ..particle_effects_data import PARTICLE_EFFECT_LUT
@@ -44,7 +46,29 @@ class GeometryMaterialRecord(PropertyGroup):
     texture_alpha: StringProperty(name="Texture Alpha", default="")
 
 
+def geometry_mesh_object_poll(_self, obj):
+    return obj is not None and getattr(obj, "type", None) == "MESH"
+
+
+def update_geometry_mesh_object(self, _context):
+    mesh_object = self.mesh_object
+    if mesh_object is None:
+        self.linked_to_object = False
+        return
+
+    self.mesh_name = mesh_object.name
+    self.linked_to_object = True
+
+
 class GeometryExportRecord(PropertyGroup):
     mesh_name: StringProperty(name="Mesh Name", default="No data")
+    bone_index: StringProperty(name="Bone Index", default="")
+    mesh_object: PointerProperty(
+        name="Mesh Object",
+        type=bpy.types.Object,
+        poll=geometry_mesh_object_poll,
+        update=update_geometry_mesh_object,
+    )
+    linked_to_object: BoolProperty(name="Linked To Mesh Object", default=False)
     materials: CollectionProperty(type=GeometryMaterialRecord)
     bin_mesh_data: StringProperty(name="BinMesh Data", default="No data")

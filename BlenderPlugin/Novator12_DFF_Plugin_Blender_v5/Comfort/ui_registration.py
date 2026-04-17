@@ -45,6 +45,8 @@ from .ui_tools import (
     ResetBoneMappingsOperator,
     SCENE_OT_clear_all,
     SCENE_PT_tools,
+    sync_geometry_tool_entries,
+    sync_geometry_tool_selection,
 )
 from ..unit_anm_export import UnitAnmExportOperator
 from ..unit_anm_import import UnitAnmImportOperator
@@ -190,7 +192,7 @@ def register_properties():
     bpy.types.Scene.particle_effects_index = IntProperty(default=0)
 
     bpy.types.Scene.geometry_tool_items = CollectionProperty(type=GeometryExportRecord)
-    bpy.types.Scene.geometry_tool_index = IntProperty(default=0)
+    bpy.types.Scene.geometry_tool_index = IntProperty(default=0, update=sync_geometry_tool_selection)
     bpy.types.Scene.s5_mesh_validation_report = StringProperty(name="Mesh Validation Report", default="")
     bpy.types.Scene.s5_mesh_validation_loose_indices = StringProperty(name="Loose Vertex Indices", default="")
 
@@ -233,6 +235,8 @@ def register():
     reset_animation_ui_state()
     if sync_timeline_to_selected_action not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(sync_timeline_to_selected_action)
+    if sync_geometry_tool_entries not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(sync_geometry_tool_entries)
 
 
 def unregister():
@@ -240,6 +244,8 @@ def unregister():
 
     if sync_timeline_to_selected_action in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(sync_timeline_to_selected_action)
+    if sync_geometry_tool_entries in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(sync_geometry_tool_entries)
     reset_animation_ui_state()
     unregister_properties()
 
