@@ -380,13 +380,10 @@ def build_building_atomic_entry(frame_index, geometry_index, particle_data, bone
             bone_type = bone_data["type"]
             if bone_type == "DECAL":
                 atomic_entry["extension"] = {
-                    "RightToRender": "RpATOMIC",
-                    "MaterialEffectsPLG": False,
+                    "MaterialFXAtomic_EffectsEnabled": True,
                 }
             elif bone_type == "BUILDING":
-                atomic_entry["extension"] = {
-                    "RightToRender": "RpATOMIC",
-                }
+                atomic_entry["extension"] = {}
             break
 
     if particle_data:

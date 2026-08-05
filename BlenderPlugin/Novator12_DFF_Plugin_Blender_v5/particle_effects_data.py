@@ -30,7 +30,7 @@ PARTICLE_EFFECT_LUT = {
                         "ParticleLifeRandom": 0.33333334,
                         "InitialDirection": {"x": 0, "y": 0, "z": 32},
                         "InitialDirectionRandom": {"x": 2, "y": 2, "z": 0.02},
-                        "ParticleSize": {"x": 1, "y": 1, "z": -2.3509886e-38},
+                        "ParticleSize": {"x": 1, "y": 1},
                         "Color": {"red": 128, "green": 255, "blue": 255, "alpha": 255},
                         "TextureCoordinates": [
                             {"x": 0, "y": 0},

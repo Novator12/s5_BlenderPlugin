@@ -279,16 +279,36 @@ def _validate_hanim_extensions(frames):
     return issues
 
 
+def _validate_atomic_extensions(atomics):
+    issues = []
+
+    for atomic_index, atomic in enumerate(atomics):
+        extension = mapping_or_empty(mapping_or_empty(atomic).get("extension"))
+        if not extension:
+            continue
+
+        right_to_render = extension.get("RightToRender")
+        if isinstance(right_to_render, str):
+            issues.append(
+                f"ERROR: Atomic {atomic_index} verwendet RightToRender als String ('{right_to_render}'). "
+                "Der Converter erwartet hier kein String-Format."
+            )
+
+    return issues
+
+
 def validate_export_payload(payload):
     issues = []
     clump = nested_mapping(payload, "clump")
     geometries = nested_list(clump, "geometries")
     frames = nested_list(clump, "frames")
+    atomics = nested_list(clump, "atomics")
 
     for geometry_index, geometry in enumerate(geometries):
         issues.extend(_validate_export_geometry(geometry_index, geometry))
 
     issues.extend(_validate_hanim_extensions(frames))
+    issues.extend(_validate_atomic_extensions(atomics))
     return issues
 
 
