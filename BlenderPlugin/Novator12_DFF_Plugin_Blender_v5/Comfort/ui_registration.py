@@ -15,8 +15,18 @@ from .constants import (
     DEFAULT_ANIM_FORMAT,
     DEFAULT_S5_FPS,
     DEFAULT_START_PREV_KEYFRAME,
+    SCENE_BIN_MESH_REPORT_PROP,
     SCENE_MESH_VALIDATION_LOOSE_INDICES_PROP,
     SCENE_MESH_VALIDATION_REPORT_PROP,
+    SCENE_UV_VALIDATION_REPORT_PROP,
+)
+from .bin_mesh_tools import (
+    GEOMETRY_OT_delete_all_bin_meshes,
+    GEOMETRY_OT_delete_bin_mesh,
+    GEOMETRY_OT_generate_all_invalid_bin_meshes,
+    GEOMETRY_OT_generate_bin_mesh,
+    GEOMETRY_OT_validate_bin_mesh,
+    GEOMETRY_PT_bin_mesh,
 )
 from .ui_animation import ACTION_OT_apply_animation_fps, ACTION_PT_animation_fps, reset_animation_ui_state, sync_timeline_to_selected_action
 from .ui_properties import BoneMappingItem, GeometryExportRecord, GeometryMaterialRecord, ParticleEffectBinding
@@ -26,16 +36,12 @@ from .ui_tools import (
     BoneMappingPanel,
     GEOMETRY_OT_add_entry,
     GEOMETRY_OT_add_material,
-    GEOMETRY_OT_delete_all_bin_meshes,
     GEOMETRY_OT_delete_loose_vertices,
     GEOMETRY_OT_remove_entry,
     GEOMETRY_OT_remove_material,
-    GEOMETRY_OT_rebuild_invalid_bin_meshes,
-    GEOMETRY_OT_rebuild_selected_bin_mesh,
     GEOMETRY_OT_reset_entries,
-    GEOMETRY_OT_validate_selected_bin_mesh,
+    GEOMETRY_OT_sync_materials_from_mesh,
     GEOMETRY_OT_validate_selected_mesh,
-    GEOMETRY_PT_bin_mesh,
     GEOMETRY_PT_mesh_validation,
     GEOMETRY_PT_tools,
     GEOMETRY_UL_tool_entries,
@@ -53,6 +59,13 @@ from .ui_tools import (
     SCENE_PT_tools,
     sync_geometry_tool_entries,
     sync_geometry_tool_selection,
+)
+from .uv_tools import (
+    GEOMETRY_OT_fix_all_uv,
+    GEOMETRY_OT_fix_uv,
+    GEOMETRY_OT_validate_all_uv,
+    GEOMETRY_OT_validate_uv,
+    GEOMETRY_PT_uv_validation,
 )
 from ..unit_anm_export import UnitAnmExportOperator
 from ..unit_anm_import import UnitAnmImportOperator
@@ -95,11 +108,18 @@ CLASSES = (
     GEOMETRY_OT_reset_entries,
     GEOMETRY_OT_add_material,
     GEOMETRY_OT_remove_material,
-    GEOMETRY_OT_validate_selected_bin_mesh,
-    GEOMETRY_OT_rebuild_selected_bin_mesh,
-    GEOMETRY_OT_rebuild_invalid_bin_meshes,
+    GEOMETRY_OT_sync_materials_from_mesh,
+    GEOMETRY_OT_validate_bin_mesh,
+    GEOMETRY_OT_generate_bin_mesh,
+    GEOMETRY_OT_delete_bin_mesh,
+    GEOMETRY_OT_generate_all_invalid_bin_meshes,
     GEOMETRY_OT_delete_all_bin_meshes,
     GEOMETRY_PT_bin_mesh,
+    GEOMETRY_OT_validate_uv,
+    GEOMETRY_OT_fix_uv,
+    GEOMETRY_OT_validate_all_uv,
+    GEOMETRY_OT_fix_all_uv,
+    GEOMETRY_PT_uv_validation,
     GEOMETRY_OT_validate_selected_mesh,
     GEOMETRY_OT_delete_loose_vertices,
     GEOMETRY_PT_mesh_validation,
@@ -207,6 +227,8 @@ def register_properties():
     bpy.types.Scene.geometry_tool_index = IntProperty(default=0, update=sync_geometry_tool_selection)
     bpy.types.Scene.s5_mesh_validation_report = StringProperty(name="Mesh Validation Report", default="")
     bpy.types.Scene.s5_mesh_validation_loose_indices = StringProperty(name="Loose Vertex Indices", default="")
+    bpy.types.Scene.s5_bin_mesh_report = StringProperty(name="BinMesh Report", default="")
+    bpy.types.Scene.s5_uv_validation_report = StringProperty(name="UV Validation Report", default="")
 
     bpy.types.Action.s5_anim_fps = StringProperty(name="FPS", default=str(DEFAULT_S5_FPS))
     bpy.types.Action.s5_anim_format = EnumProperty(name="Anim-Type", items=ANIM_FORMAT_ITEMS, default=DEFAULT_ANIM_FORMAT)
@@ -224,6 +246,8 @@ def unregister_properties():
         "geometry_tool_index",
         SCENE_MESH_VALIDATION_REPORT_PROP,
         SCENE_MESH_VALIDATION_LOOSE_INDICES_PROP,
+        SCENE_BIN_MESH_REPORT_PROP,
+        SCENE_UV_VALIDATION_REPORT_PROP,
     ):
         if hasattr(bpy.types.Scene, attr):
             delattr(bpy.types.Scene, attr)

@@ -1,7 +1,6 @@
 import bmesh
 import bpy
 
-from copy import deepcopy
 from mathutils import Vector
 
 from bpy.app.handlers import persistent
@@ -16,8 +15,8 @@ from .constants import (
     SPHERE_EXPORT_RADIUS_PROP,
     SPHERE_LINKED_MESH_PROP,
 )
+from .geometry_materials import geometry_material_status, sync_geometry_entry_materials
 from .ui_animation import reset_animation_ui_state
-from .bin_mesh_utils import bin_mesh_to_json, validate_bin_mesh
 from .validation_utils import (
     build_mesh_validation_lines,
     collect_loose_vertex_indices,
@@ -26,6 +25,11 @@ from .validation_utils import (
 )
 
 _GEOMETRY_TOOL_SYNC_LOCK = False
+
+
+def _ensure_object_mode(context):
+    if context.mode == "EDIT_MESH" and bpy.ops.object.mode_set.poll():
+        bpy.ops.object.mode_set(mode="OBJECT")
 
 
 def _geometry_entry_mesh_object(entry):
@@ -40,119 +44,40 @@ def _geometry_entry_mesh_name(entry, mesh_object=None):
     return mesh_object.name if mesh_object is not None else entry.mesh_name
 
 
-def _validate_geometry_entry_bin_mesh(entry):
-    mesh_object = _geometry_entry_mesh_object(entry)
-    if mesh_object is None:
-        return None, {
-            "valid": False,
-            "errors": ["Geometry entry is not linked to a mesh object."],
-            "bin_mesh": None,
-        }
-    return mesh_object, validate_bin_mesh(mesh_object, entry.bin_mesh_data, len(entry.materials))
+def _report_complete_mesh_validation_indices(operator, mesh_report, chunk_size=64):
+    reports = []
+    mesh_name = mesh_report["mesh_name"]
 
+    if mesh_report["non_triangle_polygons"]:
+        reports.append(("ERROR", "Non-triangulated face indices", mesh_report["non_triangle_polygons"]))
+    if mesh_report["degenerate_polygons"]:
+        reports.append(("ERROR", "Degenerate face indices", mesh_report["degenerate_polygons"]))
+    if mesh_report["loose_vertices"]:
+        reports.append(("WARNING", "Loose vertex indices", mesh_report["loose_vertices"]))
 
-def _regenerate_geometry_bin_meshes(context, entry_indices):
-    from .. import AtomicMaterialFX_Data, ParticleDataList
-    from ..building_model_export import build_building_export_json, collect_building_scene_export_payload
-    from .io_utils import convert_binary_dff_to_json, convert_json_to_binary_dff
-    from .transform_utils import get_converter_exe_location
+    for uv_layer in mesh_report["uv_layers"]:
+        layer_index = uv_layer["layer_index"]
+        if uv_layer["missing_used_vertices"]:
+            reports.append((
+                "ERROR",
+                f"UV layer {layer_index} missing vertex indices",
+                uv_layer["missing_used_vertices"],
+            ))
+        if uv_layer["conflicting_vertices"]:
+            reports.append((
+                "WARNING",
+                f"UV layer {layer_index} Vertex->UV conflict indices",
+                uv_layer["conflicting_vertices"],
+            ))
 
-    scene = context.scene
-    geometry_entries = scene.geometry_tool_items
-    target_entries = {}
-    errors = []
-
-    for entry_index in entry_indices:
-        if entry_index < 0 or entry_index >= len(geometry_entries):
-            errors.append(f"Geometry {entry_index + 1}: Entry does not exist.")
-            continue
-
-        entry = geometry_entries[entry_index]
-        mesh_object = _geometry_entry_mesh_object(entry)
-        if mesh_object is None:
-            errors.append(f"Geometry {entry_index + 1}: No linked mesh object.")
-            continue
-
-        non_triangles = [polygon.index for polygon in mesh_object.data.polygons if len(polygon.vertices) != 3]
-        if non_triangles:
-            preview = ", ".join(str(index) for index in non_triangles[:8])
-            if len(non_triangles) > 8:
-                preview += ", ..."
-            errors.append(
-                f"Geometry {entry_index + 1} ({mesh_object.name}): Non-triangulated faces: {preview}."
-            )
-            continue
-
-        target_entries[mesh_object.name] = (entry_index, entry, mesh_object)
-
-    if not target_entries:
-        return [], errors
-
-    bone_type_data, particle_data, geometry_data = collect_building_scene_export_payload(scene)
-    geometry_data = deepcopy(geometry_data or {})
-    for mesh_name, (_entry_index, _entry, _mesh_object) in target_entries.items():
-        if mesh_name not in geometry_data:
-            errors.append(f"{mesh_name}: No geometry metadata found.")
-            continue
-        geometry_data[mesh_name]["bin_mesh_data"] = "No data"
-
-    if errors:
-        invalid_names = {
-            error.split(":", 1)[0]
-            for error in errors
-            if ": No geometry metadata found" in error
-        }
-        for mesh_name in invalid_names:
-            target_entries.pop(mesh_name, None)
-    if not target_entries:
-        return [], errors
-
-    source_indices = {}
-    payload = build_building_export_json(
-        context,
-        bone_type_data,
-        particle_data,
-        geometry_data,
-        AtomicMaterialFX_Data,
-        ParticleDataList,
-        geometry_source_indices=source_indices,
-        strict_mesh_triangles=False,
-    )
-    converter_path = get_converter_exe_location()
-    binary_data = convert_json_to_binary_dff(payload, converter_path)
-    converted_payload = convert_binary_dff_to_json(binary_data, converter_path)
-    converted_geometries = converted_payload.get("clump", {}).get("geometries", [])
-
-    generated = []
-    pending_updates = []
-    for mesh_name, (entry_index, entry, mesh_object) in target_entries.items():
-        geometry_index = source_indices.get(mesh_name)
-        if geometry_index is None or geometry_index >= len(converted_geometries):
-            errors.append(
-                f"Geometry {entry_index + 1} ({mesh_name}): Mesh was skipped during building export."
-            )
-            continue
-
-        generated_bin_mesh = (
-            converted_geometries[geometry_index]
-            .get("extension", {})
-            .get("BinMeshPLG")
-        )
-        report = validate_bin_mesh(mesh_object, generated_bin_mesh, len(entry.materials))
-        if not report["valid"]:
-            errors.append(
-                f"Geometry {entry_index + 1} ({mesh_name}): Invalid S5Converter result: "
-                + "; ".join(report["errors"][:3])
-            )
-            continue
-
-        pending_updates.append((entry, bin_mesh_to_json(report["bin_mesh"])))
-        generated.append(mesh_name)
-
-    for entry, bin_mesh_json in pending_updates:
-        entry.bin_mesh_data = bin_mesh_json
-
-    return generated, errors
+    for severity, label, indices in reports:
+        part_count = (len(indices) + chunk_size - 1) // chunk_size
+        for part_index, offset in enumerate(range(0, len(indices), chunk_size), start=1):
+            chunk = indices[offset:offset + chunk_size]
+            part_label = f" (part {part_index}/{part_count})" if part_count > 1 else ""
+            message = f"Mesh '{mesh_name}': {label}{part_label}: " + ", ".join(str(index) for index in chunk)
+            operator.report({severity}, message)
+            print(f"[Mesh Validation] {message}")
 
 
 def _initialize_empty_geometry_entry(entry):
@@ -671,45 +596,149 @@ class PARTICLE_OT_reset_effects(Operator):
 
 
 class GEOMETRY_UL_tool_entries(UIList):
+    bl_idname = "GEOMETRY_UL_tool_entries"
+
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         if item is None:
             return
 
-        box_main = layout.box()
-        box_main.label(text=" Geometry {} --------------------------------------------------------------------------------------------------------------------------------------------------".format(index + 1))
-        box_main.prop(item, "mesh_object", text="Object")
-        row = box_main.row()
-        row.enabled = not item.linked_to_object
-        row.prop(item, "mesh_name", text="Mesh")
-        row = box_main.row()
-        row.enabled = not item.linked_to_object
-        row.prop(item, "bone_index", text="Bone Index")
+        if self.layout_type == "GRID":
+            layout.alignment = "CENTER"
+            layout.label(text=str(index + 1), icon="MESH_DATA")
+            return
 
-        for idx, mat in enumerate(item.materials):
-            mat_box = box_main.box()
-            mat_box.prop(mat, "name", text="Material {}".format(idx + 1))
+        status = geometry_material_status(item)
+        mesh_object = status["mesh_object"]
+        display_name = mesh_object.name if mesh_object is not None else item.mesh_name
+        object_icon = "MESH_DATA" if mesh_object is not None else "EMPTY_AXIS"
 
-            row = mat_box.row(align=True)
-            row.prop(mat, "uv_trans")
-            row.prop(mat, "dual_tex")
+        row = layout.row(align=True)
+        index_row = row.row(align=True)
+        index_row.ui_units_x = 2.4
+        index_row.label(text=f"{index + 1:02d}", icon=object_icon)
+        row.label(text=display_name)
 
-            row = mat_box.row(align=True)
-            row.prop(mat, "ambient")
-            row.prop(mat, "specular")
-            row.prop(mat, "diffuse")
+        status_row = row.row(align=True)
+        status_row.alignment = "RIGHT"
+        if status["state"] in {"ERROR", "MISSING_OBJECT"}:
+            status_row.label(text="", icon="ERROR")
+        elif status["state"] == "MISMATCH":
+            status_row.label(text="", icon="FILE_REFRESH")
+        elif status["state"] == "EMPTY":
+            status_row.label(text="", icon="PARTICLES")
+        else:
+            status_row.label(text="", icon="CHECKMARK")
+        status_row.label(text=str(len(item.materials)), icon="MATERIAL")
 
-            row = mat_box.row()
-            row.prop(mat, "snow_texture")
-            row.prop(mat, "texture_alpha")
+    def filter_items(self, context, data, propname):
+        items = getattr(data, propname)
+        flags = bpy.types.UI_UL_list.filter_items_by_name(
+            self.filter_name,
+            self.bitflag_filter_item,
+            items,
+            "mesh_name",
+            reverse=self.use_filter_invert,
+        )
+        return flags, []
 
-        row = box_main.row(align=True)
-        add_op = row.operator("geometry_tools.add_material", icon="PLUS", text="")
-        add_op.index = index
-        rem_op = row.operator("geometry_tools.remove_material", icon="X", text="")
-        rem_op.index = index
 
-        row = box_main.row()
-        row.prop(item, "bin_mesh_data", text="BinMesh")
+def _draw_geometry_materials(layout, entry, entry_index, status):
+    header = layout.row(align=True)
+    header.label(text=f"Materials ({len(entry.materials)})", icon="MATERIAL")
+    header.operator(
+        "geometry_tools.sync_materials_from_mesh",
+        icon="FILE_REFRESH",
+        text="Sync from Mesh",
+    )
+    add_op = header.operator("geometry_tools.add_material", icon="PLUS", text="")
+    add_op.index = entry_index
+    remove_op = header.operator("geometry_tools.remove_material", icon="X", text="")
+    remove_op.index = entry_index
+
+    if status["state"] == "MISMATCH":
+        warning = layout.row()
+        warning.alert = True
+        warning.label(
+            text="Geometry material names differ from the Scene mesh and will be synchronized on export.",
+            icon="FILE_REFRESH",
+        )
+    elif status["errors"]:
+        warning = layout.row()
+        warning.alert = True
+        warning.label(text=status["errors"][0], icon="ERROR")
+
+    if not entry.materials:
+        layout.label(text="No Geometry materials configured.", icon="INFO")
+        return
+
+    scene_names = status["scene_names"]
+    for material_index, material in enumerate(entry.materials):
+        material_box = layout.box()
+        material_header = material_box.row(align=True)
+        material_header.label(text=f"Slot {material_index + 1}", icon="MATERIAL")
+        if material_index < len(scene_names) and material.name != scene_names[material_index]:
+            material_header.label(text=f"Scene: {scene_names[material_index]}", icon="FILE_REFRESH")
+
+        material_box.prop(material, "name", text="Material Name")
+
+        effects = material_box.row(align=True)
+        effects.prop(material, "uv_trans", toggle=True)
+        effects.prop(material, "dual_tex", toggle=True)
+
+        lighting = material_box.row(align=True)
+        lighting.prop(material, "ambient", toggle=True)
+        lighting.prop(material, "specular", toggle=True)
+        lighting.prop(material, "diffuse", toggle=True)
+
+        material_box.prop(material, "snow_texture", text="Snow Texture")
+        material_box.prop(material, "texture_alpha", text="Texture Alpha")
+
+
+def _draw_geometry_entry_details(layout, entry, entry_index):
+    status = geometry_material_status(entry)
+    mesh_object = status["mesh_object"]
+    display_name = mesh_object.name if mesh_object is not None else entry.mesh_name
+
+    detail = layout.box()
+    detail.use_property_split = True
+    detail.use_property_decorate = False
+
+    header = detail.row(align=True)
+    geometry_icon = "PARTICLES" if status["state"] == "EMPTY" else "MESH_DATA"
+    header.label(text=f"Geometry {entry_index + 1}: {display_name}", icon=geometry_icon)
+    if status["state"] == "MATCH":
+        header.label(text="Materials synced", icon="CHECKMARK")
+    elif status["state"] == "MISMATCH":
+        header.label(text="Sync required", icon="FILE_REFRESH")
+    elif status["state"] in {"ERROR", "MISSING_OBJECT"}:
+        header.label(text="Invalid Scene materials", icon="ERROR")
+    else:
+        header.label(text="Empty Geometry", icon="PARTICLES")
+
+    detail.prop(entry, "mesh_object", text="Scene Object")
+
+    mesh_row = detail.row()
+    mesh_row.enabled = not entry.linked_to_object
+    mesh_row.prop(entry, "mesh_name", text="Mesh Name")
+
+    bone_row = detail.row()
+    bone_row.enabled = not entry.linked_to_object or status["state"] == "EMPTY"
+    bone_row.prop(entry, "bone_index", text="Bone Index")
+
+    detail.separator()
+    _draw_geometry_materials(detail, entry, entry_index, status)
+
+    detail.separator()
+    bin_mesh_box = detail.box()
+    bin_mesh_header = bin_mesh_box.row(align=True)
+    bin_mesh_header.label(text="BinMesh Data", icon="MOD_TRIANGULATE")
+    if entry.bin_mesh_data == "Empty-Geometry":
+        bin_mesh_header.label(text="Empty Geometry", icon="PARTICLES")
+    elif entry.bin_mesh_data in {"", "No data"}:
+        bin_mesh_header.label(text="Not generated", icon="INFO")
+    else:
+        bin_mesh_header.label(text="Stored", icon="CHECKMARK")
+    bin_mesh_box.prop(entry, "bin_mesh_data", text="")
 
 
 class GEOMETRY_PT_tools(Panel):
@@ -721,37 +750,81 @@ class GEOMETRY_PT_tools(Panel):
 
     def draw(self, context):
         layout = self.layout
-        layout.label(text="Geometry Data:")
-        layout.label(text="For particle effects: use an Empty Geometry entry and assign its Bone Index.")
         scene = context.scene
 
-        layout.template_list("GEOMETRY_UL_tool_entries", "", scene, "geometry_tool_items", scene, "geometry_tool_index")
-
-        row = layout.row()
-        row.operator("geometry_tools.add_entry", icon="PLUS")
-        row.operator("geometry_tools.remove_entry", icon="X")
-        row.operator("geometry_tools.reset_entries", icon="LOOP_BACK")
-
-
-class GEOMETRY_PT_bin_mesh(Panel):
-    bl_idname = "VIEW3D_PT_geometry_bin_mesh"
-    bl_label = "BinMesh Validation"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "Geometry Tools"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.label(text="BinMesh Actions:")
-        row = layout.row(align=True)
-        row.operator("geometry_tools.validate_selected_bin_mesh", icon="CHECKMARK", text="Validate")
-        row.operator("geometry_tools.rebuild_selected_bin_mesh", icon="FILE_REFRESH", text="Generate")
-        layout.operator(
-            "geometry_tools.rebuild_invalid_bin_meshes",
-            icon="MOD_TRIANGULATE",
-            text="Generate All Invalid BinMeshes",
+        info_box = layout.box()
+        info_box.label(
+            text="For particle effects, use an Empty Geometry entry and assign its Bone Index.",
+            icon="INFO",
         )
-        layout.operator("geometry_tools.delete_all_bin_meshes", icon="TRASH", text="Delete All BinMeshes")
+
+        list_header = layout.row(align=True)
+        list_header.label(text="Geometries", icon="OUTLINER_OB_MESH")
+        list_header.label(text=str(len(scene.geometry_tool_items)))
+
+        list_row = layout.row()
+        list_row.template_list(
+            "GEOMETRY_UL_tool_entries",
+            "geometry_entries",
+            scene,
+            "geometry_tool_items",
+            scene,
+            "geometry_tool_index",
+            rows=7,
+            maxrows=10,
+        )
+        actions = list_row.column(align=True)
+        actions.operator("geometry_tools.add_entry", icon="PLUS", text="")
+        actions.operator("geometry_tools.remove_entry", icon="X", text="")
+        actions.separator()
+        actions.operator("geometry_tools.reset_entries", icon="LOOP_BACK", text="")
+
+        if not scene.geometry_tool_items:
+            layout.label(text="No Geometry entries. Select a mesh and add one.", icon="INFO")
+            return
+
+        entry_index = min(max(scene.geometry_tool_index, 0), len(scene.geometry_tool_items) - 1)
+        _draw_geometry_entry_details(
+            layout,
+            scene.geometry_tool_items[entry_index],
+            entry_index,
+        )
+
+
+class GEOMETRY_OT_sync_materials_from_mesh(Operator):
+    bl_idname = "geometry_tools.sync_materials_from_mesh"
+    bl_label = "Sync Materials from Mesh"
+    bl_description = "Copies material slot names and count from the active Geometry mesh; Snow Texture is preserved"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scene = context.scene
+        entry_index = scene.geometry_tool_index
+        if entry_index < 0 or entry_index >= len(scene.geometry_tool_items):
+            self.report({"ERROR"}, "No Geometry entry selected.")
+            return {"CANCELLED"}
+
+        entry = scene.geometry_tool_items[entry_index]
+        result = sync_geometry_entry_materials(entry)
+        if result["errors"]:
+            for message in result["errors"]:
+                print(f"[Geometry Materials] ERROR: {message}")
+            self.report({"ERROR"}, result["errors"][0])
+            return {"CANCELLED"}
+        if result["status"]["state"] == "EMPTY":
+            self.report({"INFO"}, "Empty Geometry does not require Scene material synchronization.")
+            return {"FINISHED"}
+        if not result["changed"]:
+            self.report({"INFO"}, "Geometry materials already match the Scene mesh.")
+            return {"FINISHED"}
+
+        for change in result["changes"]:
+            print(f"[Geometry Materials] Geometry {entry_index + 1}: {change}")
+        self.report(
+            {"INFO"},
+            f"Synchronized {len(result['changes'])} material changes from the Scene mesh.",
+        )
+        return {"FINISHED"}
 
 
 class GEOMETRY_OT_add_entry(Operator):
@@ -765,6 +838,9 @@ class GEOMETRY_OT_add_entry(Operator):
             geometry_entry.mesh_name = mesh_object.name
             geometry_entry.mesh_object = mesh_object
             geometry_entry.linked_to_object = True
+            sync_result = sync_geometry_entry_materials(geometry_entry)
+            if sync_result["errors"]:
+                self.report({"WARNING"}, sync_result["errors"][0])
         else:
             _initialize_empty_geometry_entry(geometry_entry)
         context.scene.geometry_tool_index = len(context.scene.geometry_tool_items) - 1
@@ -819,16 +895,18 @@ class GEOMETRY_OT_remove_material(Operator):
 class GEOMETRY_OT_validate_selected_mesh(Operator):
     bl_idname = "geometry_tools.validate_selected_mesh"
     bl_label = "Validate Selected Mesh"
-    bl_description = "Prueft das aktive Mesh auf Export-Probleme bei UVs, Triangles und BinMesh-Daten"
+    bl_description = "Checks the active mesh for topology, loose vertices, and basic UV problems"
 
     def execute(self, context):
+        _ensure_object_mode(context)
         mesh_object = context.active_object
         if mesh_object is None or mesh_object.type != "MESH" or mesh_object.data is None:
-            self.report({"ERROR"}, "Kein aktives Mesh ausgewaehlt.")
+            self.report({"ERROR"}, "No active mesh selected.")
             return {"CANCELLED"}
 
         mesh_report = validate_mesh_object(mesh_object)
         lines = build_mesh_validation_lines(mesh_report)
+        _report_complete_mesh_validation_indices(self, mesh_report)
         setattr(context.scene, SCENE_MESH_VALIDATION_REPORT_PROP, "\n".join(lines))
         setattr(
             context.scene,
@@ -839,154 +917,30 @@ class GEOMETRY_OT_validate_selected_mesh(Operator):
         has_error = any(line.startswith("ERROR:") for line in lines)
         has_warning = any(line.startswith("WARN:") for line in lines)
         if has_error:
-            self.report({"WARNING"}, "Mesh-Check abgeschlossen: Fehler gefunden. Details im Mesh Validation Panel.")
+            self.report({"WARNING"}, "Mesh validation found errors. See Mesh Validation.")
         elif has_warning:
-            self.report({"INFO"}, "Mesh-Check abgeschlossen: Warnungen gefunden. Details im Mesh Validation Panel.")
+            self.report({"INFO"}, "Mesh validation found warnings. See Mesh Validation.")
         else:
-            self.report({"INFO"}, "Mesh-Check abgeschlossen: Keine Probleme gefunden.")
-        return {"FINISHED"}
-
-
-class GEOMETRY_OT_validate_selected_bin_mesh(Operator):
-    bl_idname = "geometry_tools.validate_selected_bin_mesh"
-    bl_label = "Validate Selected BinMesh"
-    bl_description = "Validates the schema, vertex indices, material indices, and TriStrip topology of the selected Geometry entry"
-
-    def execute(self, context):
-        scene = context.scene
-        index = scene.geometry_tool_index
-        if index < 0 or index >= len(scene.geometry_tool_items):
-            self.report({"ERROR"}, "No Geometry entry selected.")
-            return {"CANCELLED"}
-
-        entry = scene.geometry_tool_items[index]
-        mesh_object, report = _validate_geometry_entry_bin_mesh(entry)
-        mesh_name = mesh_object.name if mesh_object is not None else entry.mesh_name
-        lines = [f"BinMesh: {mesh_name}"]
-        if report["valid"]:
-            lines.append("OK: Schema, indices, materials, and TriStrip topology are valid.")
-        else:
-            lines.append("ERROR: BinMesh is invalid.")
-        setattr(scene, SCENE_MESH_VALIDATION_REPORT_PROP, "\n".join(lines))
-
-        if report["valid"]:
-            self.report({"INFO"}, f"BinMesh for '{mesh_name}' is valid.")
-        else:
-            self.report({"WARNING"}, f"BinMesh for '{mesh_name}' is invalid. See the Mesh Validation panel.")
-        return {"FINISHED"}
-
-
-class GEOMETRY_OT_rebuild_selected_bin_mesh(Operator):
-    bl_idname = "geometry_tools.rebuild_selected_bin_mesh"
-    bl_label = "Generate Selected BinMesh"
-    bl_description = "Regenerates the BinMesh of the selected Geometry entry with S5Converter"
-
-    def execute(self, context):
-        index = context.scene.geometry_tool_index
-        if index < 0 or index >= len(context.scene.geometry_tool_items):
-            self.report({"ERROR"}, "No Geometry entry selected.")
-            return {"CANCELLED"}
-
-        try:
-            generated, errors = _regenerate_geometry_bin_meshes(context, [index])
-        except Exception as exc:
-            self.report({"ERROR"}, f"BinMesh generation failed: {exc}")
-            return {"CANCELLED"}
-
-        if errors:
-            setattr(context.scene, SCENE_MESH_VALIDATION_REPORT_PROP, "\n".join(f"ERROR: {error}" for error in errors))
-        if not generated:
-            self.report({"ERROR"}, errors[0] if errors else "BinMesh could not be generated.")
-            return {"CANCELLED"}
-
-        self.report({"INFO"}, f"BinMesh for '{generated[0]}' was generated and validated.")
-        return {"FINISHED"}
-
-
-class GEOMETRY_OT_rebuild_invalid_bin_meshes(Operator):
-    bl_idname = "geometry_tools.rebuild_invalid_bin_meshes"
-    bl_label = "Generate Invalid BinMeshes"
-    bl_description = "Validates all Geometry entries and regenerates only invalid BinMeshes with S5Converter"
-
-    def execute(self, context):
-        invalid_indices = []
-        for index, entry in enumerate(context.scene.geometry_tool_items):
-            mesh_object = _geometry_entry_mesh_object(entry)
-            if mesh_object is None:
-                continue
-            report = validate_bin_mesh(mesh_object, entry.bin_mesh_data, len(entry.materials))
-            if not report["valid"]:
-                invalid_indices.append(index)
-
-        if not invalid_indices:
-            self.report({"INFO"}, "All linked BinMeshes are already valid.")
-            return {"FINISHED"}
-
-        try:
-            generated, errors = _regenerate_geometry_bin_meshes(context, invalid_indices)
-        except Exception as exc:
-            self.report({"ERROR"}, f"BinMesh generation failed: {exc}")
-            return {"CANCELLED"}
-
-        report_lines = [f"OK: BinMesh generated: {name}" for name in generated]
-        report_lines.extend(f"ERROR: {error}" for error in errors)
-        setattr(context.scene, SCENE_MESH_VALIDATION_REPORT_PROP, "\n".join(report_lines))
-
-        if errors:
-            self.report(
-                {"WARNING"},
-                f"Generated {len(generated)} BinMeshes; {len(errors)} entries failed. See the Mesh Validation panel.",
-            )
-        else:
-            self.report({"INFO"}, f"Generated and validated {len(generated)} BinMeshes.")
-        return {"FINISHED"}
-
-
-class GEOMETRY_OT_delete_all_bin_meshes(Operator):
-    bl_idname = "geometry_tools.delete_all_bin_meshes"
-    bl_label = "Delete All BinMeshes"
-    bl_description = "Deletes all stored BinMesh data while preserving Empty Geometry markers"
-    bl_options = {"REGISTER", "UNDO"}
-
-    @classmethod
-    def poll(cls, context):
-        return bool(getattr(context.scene, "geometry_tool_items", None))
-
-    def invoke(self, context, event):
-        return context.window_manager.invoke_confirm(self, event)
-
-    def execute(self, context):
-        deleted_count = 0
-        for entry in context.scene.geometry_tool_items:
-            is_empty_geometry = entry.bin_mesh_data == "Empty-Geometry" or (
-                entry.mesh_name == "Empty-Geometry" and _geometry_entry_mesh_object(entry) is None
-            )
-            replacement = "Empty-Geometry" if is_empty_geometry else "No data"
-            if entry.bin_mesh_data != replacement:
-                entry.bin_mesh_data = replacement
-                deleted_count += 1
-
-        setattr(context.scene, SCENE_MESH_VALIDATION_REPORT_PROP, "")
-        self.report({"INFO"}, f"Deleted {deleted_count} stored BinMeshes.")
+            self.report({"INFO"}, "Mesh validation passed.")
         return {"FINISHED"}
 
 
 class GEOMETRY_OT_delete_loose_vertices(Operator):
     bl_idname = "geometry_tools.delete_loose_vertices"
     bl_label = "Delete Loose Vertices"
-    bl_description = "Loescht unbenutzte Vertices im aktiven Mesh"
+    bl_description = "Deletes unused vertices from the active mesh"
 
     def execute(self, context):
         mesh_object = context.active_object
         if mesh_object is None or mesh_object.type != "MESH" or mesh_object.data is None:
-            self.report({"ERROR"}, "Kein aktives Mesh ausgewaehlt.")
+            self.report({"ERROR"}, "No active mesh selected.")
             return {"CANCELLED"}
 
         mesh_data = mesh_object.data
         loose_indices = collect_loose_vertex_indices(mesh_object)
         if not loose_indices:
             setattr(context.scene, SCENE_MESH_VALIDATION_LOOSE_INDICES_PROP, "")
-            self.report({"INFO"}, "Keine losen Vertices gefunden.")
+            self.report({"INFO"}, "No loose vertices found.")
             return {"CANCELLED"}
 
         if mesh_object.mode == "EDIT":
@@ -1013,7 +967,7 @@ class GEOMETRY_OT_delete_loose_vertices(Operator):
             SCENE_MESH_VALIDATION_LOOSE_INDICES_PROP,
             ",".join(str(index) for index in mesh_report["loose_vertices"]),
         )
-        self.report({"INFO"}, f"{len(loose_indices)} lose Vertices geloescht.")
+        self.report({"INFO"}, f"Deleted {len(loose_indices)} loose vertices.")
         return {"FINISHED"}
 
 
@@ -1034,7 +988,7 @@ class GEOMETRY_PT_mesh_validation(Panel):
 
         report = getattr(context.scene, SCENE_MESH_VALIDATION_REPORT_PROP, "")
         if not report:
-            layout.label(text="Noch kein Report vorhanden.")
+            layout.label(text="No mesh validation report available.")
             return
 
         box = layout.box()

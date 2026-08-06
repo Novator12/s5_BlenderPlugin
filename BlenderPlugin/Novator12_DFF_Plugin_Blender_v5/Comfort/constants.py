@@ -21,6 +21,8 @@ ANIM_FORMAT_ITEMS = (
 
 SCENE_MESH_VALIDATION_REPORT_PROP = "s5_mesh_validation_report"
 SCENE_MESH_VALIDATION_LOOSE_INDICES_PROP = "s5_mesh_validation_loose_indices"
+SCENE_BIN_MESH_REPORT_PROP = "s5_bin_mesh_report"
+SCENE_UV_VALIDATION_REPORT_PROP = "s5_uv_validation_report"
 
 ROOT_HANIM_NODES_PROP = "s5_root_hanim_nodes"
 ROOT_HANIM_PARENTS_PROP = "s5_root_hanim_parents"

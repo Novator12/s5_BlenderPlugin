@@ -30,20 +30,18 @@ from .Comfort.transform_utils import (
 KNOWN_PARTICLE_EFFECTS = set(PARTICLE_EFFECT_LUT)
 
 
-def _assign_active_object_material(material_name):
-    active_object = bpy.context.object
-    material = bpy.data.materials.get(material_name)
+def _assign_mesh_materials(mesh_object, geometry_data):
+    material_slots = mesh_object.data.materials
+    material_slots.clear()
 
-    if material is None:
-        material = bpy.data.materials.new(name=material_name)
-
-    material_slots = active_object.data.materials
-    if material_slots:
-        material_slots[0] = material
-    else:
+    for material_index, material_data in enumerate(geometry_data.get("materials", [])):
+        textures = material_data.get("textures", [])
+        texture_name = textures[0].get("texture", "") if textures else ""
+        material_name = texture_name or f"GeometryMaterial{material_index + 1:02d}"
+        material = bpy.data.materials.get(material_name)
+        if material is None:
+            material = bpy.data.materials.new(name=material_name)
         material_slots.append(material)
-
-    return material
 
 
 def _infer_bone_type(user_data):
@@ -217,6 +215,7 @@ def _populate_faces(bm, uv_layer, snow_uv_layer, geometry_data, empty_geometry, 
         try:
             vertices = [bm.verts[triangle["v1"]], bm.verts[triangle["v2"]], bm.verts[triangle["v3"]]]
             face = bm.faces.new(vertices)
+            face.material_index = int(triangle.get("materialId", 0))
             bm.faces.index_update()
 
             for vertex in vertices:
@@ -264,9 +263,9 @@ def _build_mesh_object(geometry_data, armature_object, frame_rest_matrix, bone_n
     if empty_geometry:
         mesh_object.data.name = "Empty-Geometry"
     else:
-        texture_name = geometry_data["materials"][0]["textures"][0]["texture"]
-        _assign_active_object_material(texture_name)
-        mesh_object.data.name = texture_name
+        _assign_mesh_materials(mesh_object, geometry_data)
+        first_material = mesh_object.data.materials[0] if mesh_object.data.materials else None
+        mesh_object.data.name = first_material.name if first_material is not None else mesh_name
 
     return mesh_object, mesh_name, empty_geometry
 

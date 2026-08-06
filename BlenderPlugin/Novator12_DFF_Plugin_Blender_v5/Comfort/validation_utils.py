@@ -1,4 +1,5 @@
 from .json_utils import list_or_empty, mapping_or_empty, nested_list, nested_mapping
+from .mesh_utils import uv_layer_coordinates
 
 
 def format_index_preview(indices, limit=8):
@@ -38,22 +39,29 @@ def validate_mesh_object(mesh_object):
     used_vertices = set(range(len(mesh_data.vertices))) - set(loose_vertices)
     tolerance = 1.0e-6
     for layer_index, uv_layer in enumerate(mesh_data.uv_layers):
+        uv_values, coordinate_property = uv_layer_coordinates(
+            uv_layer,
+            expected_count=len(mesh_data.loops),
+        )
         vertex_to_uv = {}
         conflicting_vertices = set()
 
-        for polygon in mesh_data.polygons:
-            for vertex_index, loop_index in zip(polygon.vertices, polygon.loop_indices):
-                uv = uv_layer.data[loop_index].uv
-                uv_pair = (float(uv.x), float(uv.y))
-                previous_uv = vertex_to_uv.get(vertex_index)
-                if previous_uv is None:
-                    vertex_to_uv[vertex_index] = uv_pair
-                    continue
-                if abs(previous_uv[0] - uv_pair[0]) > tolerance or abs(previous_uv[1] - uv_pair[1]) > tolerance:
-                    conflicting_vertices.add(vertex_index)
+        if len(uv_values) == len(mesh_data.loops):
+            for polygon in mesh_data.polygons:
+                for vertex_index, loop_index in zip(polygon.vertices, polygon.loop_indices):
+                    uv = getattr(uv_values[loop_index], coordinate_property)
+                    uv_pair = (float(uv.x), float(uv.y))
+                    previous_uv = vertex_to_uv.get(vertex_index)
+                    if previous_uv is None:
+                        vertex_to_uv[vertex_index] = uv_pair
+                        continue
+                    if abs(previous_uv[0] - uv_pair[0]) > tolerance or abs(previous_uv[1] - uv_pair[1]) > tolerance:
+                        conflicting_vertices.add(vertex_index)
 
         uv_layers.append({
             "layer_index": layer_index,
+            "entry_count": len(uv_values),
+            "loop_count": len(mesh_data.loops),
             "missing_used_vertices": sorted(vertex for vertex in used_vertices if vertex not in vertex_to_uv),
             "conflicting_vertices": sorted(conflicting_vertices),
         })
@@ -78,47 +86,52 @@ def build_mesh_validation_lines(mesh_report):
 
     if mesh_report["non_triangle_polygons"]:
         lines.append(
-            "ERROR: Nicht-triangulierte Faces gefunden. "
-            f"Exporter nimmt nur die ersten 3 Vertices. Face-Indizes: {format_index_preview(mesh_report['non_triangle_polygons'])}"
+            "ERROR: Non-triangulated faces found. "
+            f"Face indices: {format_index_preview(mesh_report['non_triangle_polygons'])}"
         )
     else:
-        lines.append("OK: Alle Faces sind trianguliert.")
+        lines.append("OK: All faces are triangulated.")
 
     if mesh_report["degenerate_polygons"]:
         lines.append(
-            "ERROR: Degenerierte Faces mit doppelten Vertex-Indizes gefunden. "
-            f"Face-Indizes: {format_index_preview(mesh_report['degenerate_polygons'])}"
+            "ERROR: Degenerate faces with duplicate vertex indices found. "
+            f"Face indices: {format_index_preview(mesh_report['degenerate_polygons'])}"
         )
 
     if mesh_report["loose_vertices"]:
         lines.append(
-            "WARN: Lose/unbenutzte Vertices gefunden. "
-            f"Vertex-Indizes: {format_index_preview(mesh_report['loose_vertices'])}"
+            "WARN: Loose or unused vertices found. "
+            f"Vertex indices: {format_index_preview(mesh_report['loose_vertices'])}"
         )
     else:
-        lines.append("OK: Keine losen Vertices gefunden.")
+        lines.append("OK: No loose vertices found.")
 
     if mesh_report["uv_layer_count"] == 0:
-        lines.append("WARN: Keine UV-Layer vorhanden.")
+        lines.append("WARN: No UV layers found.")
     else:
         for uv_layer in mesh_report["uv_layers"]:
             layer_index = uv_layer["layer_index"]
+            if uv_layer["entry_count"] != uv_layer["loop_count"]:
+                lines.append(
+                    f"ERROR: UV layer {layer_index} has {uv_layer['entry_count']} entries for "
+                    f"{uv_layer['loop_count']} face corners."
+                )
+                continue
             if uv_layer["missing_used_vertices"]:
                 lines.append(
-                    f"ERROR: UV-Layer {layer_index} hat benutzte Vertices ohne UV. "
-                    f"Vertex-Indizes: {format_index_preview(uv_layer['missing_used_vertices'])}"
+                    f"ERROR: UV layer {layer_index} has used vertices without UV coordinates. "
+                    f"Vertex indices: {format_index_preview(uv_layer['missing_used_vertices'])}"
                 )
             else:
-                lines.append(f"OK: UV-Layer {layer_index} deckt alle benutzten Vertices ab.")
+                lines.append(f"OK: UV layer {layer_index} covers all used vertices.")
 
             if uv_layer["conflicting_vertices"]:
                 lines.append(
-                    f"WARN: UV-Layer {layer_index} hat Vertex->UV-Konflikte an Seams. "
-                    "Der Exporter speichert nur einen UV-Wert pro Vertex. "
-                    f"Vertex-Indizes: {format_index_preview(uv_layer['conflicting_vertices'])}"
+                    f"WARN: UV layer {layer_index} has vertex-to-UV conflicts at seams. "
+                    f"Vertex indices: {format_index_preview(uv_layer['conflicting_vertices'])}"
                 )
             else:
-                lines.append(f"OK: UV-Layer {layer_index} hat keine Vertex->UV-Konflikte.")
+                lines.append(f"OK: UV layer {layer_index} has no vertex-to-UV conflicts.")
 
     return lines
 
