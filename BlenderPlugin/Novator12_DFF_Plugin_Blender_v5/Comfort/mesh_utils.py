@@ -1,10 +1,17 @@
 from collections import OrderedDict
 
 
+def _default_uv_entry():
+    return OrderedDict((
+        ("u", 0.0),
+        ("v", 0.0),
+    ))
+
+
 def collect_texture_coordinates(mesh_object, vertex_count):
     texture_coordinate_sets = []
     for uv_layer in mesh_object.data.uv_layers:
-        layer_coordinates = [None] * vertex_count
+        layer_coordinates = [_default_uv_entry() for _ in range(vertex_count)]
         has_uvs = False
 
         for polygon in mesh_object.data.polygons:

@@ -279,13 +279,14 @@ def _validate_hanim_extensions(frames):
     return issues
 
 
-def _validate_atomic_extensions(atomics):
+def _validate_atomic_extensions(atomics, geometries):
     issues = []
 
     for atomic_index, atomic in enumerate(atomics):
-        extension = mapping_or_empty(mapping_or_empty(atomic).get("extension"))
+        atomic_mapping = mapping_or_empty(atomic)
+        extension = mapping_or_empty(atomic_mapping.get("extension"))
         if not extension:
-            continue
+            extension = {}
 
         right_to_render = extension.get("RightToRender")
         if isinstance(right_to_render, str):
@@ -293,6 +294,61 @@ def _validate_atomic_extensions(atomics):
                 f"ERROR: Atomic {atomic_index} verwendet RightToRender als String ('{right_to_render}'). "
                 "Der Converter erwartet hier kein String-Format."
             )
+
+        geometry_index = atomic_mapping.get("geometryIndex", -1)
+        geometry = geometries[geometry_index] if isinstance(geometry_index, int) and 0 <= geometry_index < len(geometries) else {}
+        geometry_material_fx = False
+        for material in list_or_empty(mapping_or_empty(geometry).get("materials")):
+            material_extension = mapping_or_empty(mapping_or_empty(material).get("extension"))
+            if "MaterialFXMat" in material_extension or "MaterialUVAnim" in material_extension:
+                geometry_material_fx = True
+                break
+
+        if geometry_material_fx and "MaterialFXAtomic_EffectsEnabled" not in extension:
+            issues.append(
+                f"ERROR: Atomic {atomic_index} referenziert Geometry {geometry_index} mit MaterialFX-Material, "
+                "hat aber kein MaterialFXAtomic_EffectsEnabled im Atomic-Extension-Block."
+            )
+
+        particle_payload = None
+        if "ParticleStandard" in extension:
+            particle_payload = mapping_or_empty(extension.get("ParticleStandard"))
+        elif "Emitters" in extension:
+            particle_payload = extension
+            issues.append(
+                f"ERROR: Atomic {atomic_index} verwendet Flags/Emitters direkt in atomic.extension. "
+                "Der S5Converter erwartet hier extension.ParticleStandard."
+            )
+
+        if not particle_payload:
+            continue
+
+        for emitter_index, emitter in enumerate(list_or_empty(particle_payload.get("Emitters"))):
+            emitter_standard = mapping_or_empty(mapping_or_empty(emitter).get("EmitterStandard"))
+            if not emitter_standard:
+                continue
+
+            particle_texture = mapping_or_empty(emitter_standard.get("ParticleTexture"))
+            if particle_texture:
+                if "TexPadding" not in particle_texture:
+                    issues.append(
+                        f"ERROR: Atomic {atomic_index} Emitter {emitter_index} hat keine ParticleTexture.TexPadding."
+                    )
+                if "TextureAlphaPadding" not in particle_texture:
+                    issues.append(
+                        f"ERROR: Atomic {atomic_index} Emitter {emitter_index} hat keine ParticleTexture.TextureAlphaPadding."
+                    )
+
+            if "ParticleSize_SeriMisstake" in emitter_standard:
+                issues.append(
+                    f"ERROR: Atomic {atomic_index} Emitter {emitter_index} verwendet den Legacy-Key "
+                    "'ParticleSize_SeriMisstake'. Erwartet wird 'ParticleSizeSeriMisstake'."
+                )
+            elif "ParticleSize" in emitter_standard and "ParticleSizeSeriMisstake" not in emitter_standard:
+                issues.append(
+                    f"WARN: Atomic {atomic_index} Emitter {emitter_index} hat ParticleSize, aber kein "
+                    "ParticleSizeSeriMisstake."
+                )
 
     return issues
 
@@ -308,7 +364,7 @@ def validate_export_payload(payload):
         issues.extend(_validate_export_geometry(geometry_index, geometry))
 
     issues.extend(_validate_hanim_extensions(frames))
-    issues.extend(_validate_atomic_extensions(atomics))
+    issues.extend(_validate_atomic_extensions(atomics, geometries))
     return issues
 
 

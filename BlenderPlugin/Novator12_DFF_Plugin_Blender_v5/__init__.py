@@ -4,7 +4,7 @@
 bl_info = {
     "name": "Novator12 DFF Plugin Blender v5",
     "author": "Novator12",
-    "version": (3, 0, 1),
+    "version": (3, 1, 0),
     "blender": (5, 0, 0),
     "location": "File > Import-Export + View3D Sidebar",
     "description": "Import/Export fuer starre Gebaeude und Gebaeude-Animationen (Settlers 5) inkl. UserData/Particle/Geometry Tools",

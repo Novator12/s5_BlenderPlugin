@@ -9,7 +9,14 @@ from bpy.props import StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ImportHelper
 
-from .Comfort.constants import BONE_NAME_PADDING, BUILDING_BONE_DISPLAY_LENGTH
+from .Comfort.constants import (
+    BONE_NAME_PADDING,
+    BUILDING_BONE_DISPLAY_LENGTH,
+    MESH_SPHERE_NAME_PROP,
+    SPHERE_EXPORT_CENTER_PROP,
+    SPHERE_EXPORT_RADIUS_PROP,
+    SPHERE_LINKED_MESH_PROP,
+)
 from .Comfort.io_utils import load_building_model_payload
 from .particle_effects_data import PARTICLE_EFFECT_LUT
 from .Comfort.transform_utils import (
@@ -264,7 +271,7 @@ def _build_mesh_object(geometry_data, armature_object, frame_rest_matrix, bone_n
     return mesh_object, mesh_name, empty_geometry
 
 
-def _attach_sphere_proxy(geometry_data, mesh_object, empty_geometry):
+def _attach_sphere_proxy(geometry_data, mesh_object, empty_geometry, frame_rest_matrix):
     sphere_data = geometry_data["morphTargets"][0].get("sphere")
     if sphere_data is None:
         return
@@ -279,10 +286,9 @@ def _attach_sphere_proxy(geometry_data, mesh_object, empty_geometry):
     if bpy.ops.object.mode_set.poll():
         bpy.ops.object.mode_set(mode="OBJECT")
 
-    bpy.ops.mesh.primitive_uv_sphere_add(
-        radius=sphere_data["radius"],
-        location=(sphere_data["x"], sphere_data["y"], sphere_data["z"]),
-    )
+    export_center = mu.Vector((sphere_data["x"], sphere_data["y"], sphere_data["z"]))
+    display_center = (frame_rest_matrix @ export_center.to_4d()).to_3d()
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=sphere_data["radius"], location=(0.0, 0.0, 0.0))
     sphere_object = bpy.context.object
     sphere_object.name = sphere_name
 
@@ -290,8 +296,14 @@ def _attach_sphere_proxy(geometry_data, mesh_object, empty_geometry):
         raise RuntimeError("Sphere creation stayed in mesh edit context")
 
     sphere_object.parent = mesh_object
+    sphere_object.location = display_center
     sphere_object.hide_render = True
+    sphere_object.hide_set(True)
     sphere_object.display_type = "WIRE"
+    mesh_object[MESH_SPHERE_NAME_PROP] = sphere_object.name
+    sphere_object[SPHERE_LINKED_MESH_PROP] = mesh_object.name
+    sphere_object[SPHERE_EXPORT_CENTER_PROP] = list(export_center)
+    sphere_object[SPHERE_EXPORT_RADIUS_PROP] = sphere_data["radius"]
 
     if previous_mode == "EDIT" and bpy.ops.object.mode_set.poll():
         bpy.ops.object.mode_set(mode="EDIT")
@@ -358,7 +370,7 @@ def build_building_geometry(geometry_data, armature_object, frame_rest_matrix, b
         bone_name,
         mesh_index,
     )
-    _attach_sphere_proxy(geometry_data, mesh_object, empty_geometry)
+    _attach_sphere_proxy(geometry_data, mesh_object, empty_geometry, frame_rest_matrix)
     _write_geometry_tool_metadata(bpy.context.scene, geometry_data, mesh_object, empty_geometry)
     return mesh_index + 1
 
@@ -398,6 +410,19 @@ def sync_imported_particle_effects(clump_data, particle_data_map):
     if not hasattr(scene, "particle_effects"):
         return particle_data_map
 
+    def extract_particle_payload(extension):
+        if not isinstance(extension, dict):
+            return None, False
+
+        wrapped_payload = extension.get("ParticleStandard")
+        if isinstance(wrapped_payload, dict) and "Emitters" in wrapped_payload:
+            return wrapped_payload, True
+
+        if "Emitters" in extension:
+            return extension, False
+
+        return None, False
+
     used_frame_indices = set()
     for atomic_entry in clump_data["atomics"]:
         frame_index = atomic_entry.get("frameIndex")
@@ -405,21 +430,14 @@ def sync_imported_particle_effects(clump_data, particle_data_map):
             continue
 
         extension = atomic_entry.get("extension", {})
-        particle_standard = extension.get("ParticleStandard")
-
-        if "ParticleStandard" in extension:
-            particle_data_map[int(frame_index)] = particle_standard
-            effect_item = scene.particle_effects.add()
-            effect_item.bone_index = str(frame_index)
-            effect_item.effect_type = "Ubisoft"
-            scene.particle_effects_index = len(scene.particle_effects) - 1
-            used_frame_indices.add(frame_index)
+        particle_payload, wrapped_payload = extract_particle_payload(extension)
+        if not particle_payload:
             continue
 
-        if not particle_standard or "Emitters" not in particle_standard:
-            continue
+        particle_data_map[int(frame_index)] = particle_payload
 
-        for emitter in particle_standard["Emitters"]:
+        matched_effect = None
+        for emitter in particle_payload["Emitters"]:
             particle_texture = emitter.get("EmitterStandard", {}).get("ParticleTexture", {})
             texture_name = particle_texture.get("texture", "").lower()
 
@@ -427,15 +445,15 @@ def sync_imported_particle_effects(clump_data, particle_data_map):
                 (effect_name for effect_name in KNOWN_PARTICLE_EFFECTS if effect_name.lower() in texture_name),
                 None,
             )
-            if matched_effect is None:
-                continue
+            if matched_effect is not None:
+                break
 
-            effect_item = scene.particle_effects.add()
-            effect_item.bone_index = str(frame_index)
-            effect_item.effect_type = matched_effect
-            scene.particle_effects_index = len(scene.particle_effects) - 1
-            used_frame_indices.add(frame_index)
-            break
+        effect_item = scene.particle_effects.add()
+        effect_item.bone_index = str(frame_index)
+        effect_item.effect_type = "Ubisoft" if wrapped_payload or matched_effect is None else matched_effect
+        scene.particle_effects_index = len(scene.particle_effects) - 1
+        used_frame_indices.add(frame_index)
+        continue
 
     return particle_data_map
 
