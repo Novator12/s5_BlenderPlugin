@@ -24,6 +24,14 @@ class BoneMappingItem(PropertyGroup):
         ],
         default="DECAL",
     )
+    include_tag: BoolProperty(
+        name="Tag + Effect",
+        description=(
+            "Keeps or adds 'tag = <Bone Name>' together with the selected effect; "
+            "use this for animated snow/decal frames"
+        ),
+        default=False,
+    )
 
 
 class ParticleEffectBinding(PropertyGroup):

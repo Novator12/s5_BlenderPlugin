@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 import bmesh
 import bpy
@@ -53,6 +54,13 @@ def _infer_bone_type(user_data):
     return None
 
 
+def _user_data_has_tag(user_data):
+    return any(
+        re.match(r"^tag\s*=", str(property_line).strip(), flags=re.IGNORECASE)
+        for property_line in user_data.get("3dsmax User Properties", [])
+    )
+
+
 def _sync_bone_manager_entry(scene, frame_index, node_id, user_data):
     if not hasattr(scene, "bone_items") or node_id is None or user_data is None:
         return
@@ -70,6 +78,7 @@ def _sync_bone_manager_entry(scene, frame_index, node_id, user_data):
     bone_item.bone_index = str(frame_index)
     bone_item.bone_name = node_id_text
     bone_item.bone_type = bone_type
+    bone_item.include_tag = _user_data_has_tag(user_data)
     scene.bone_active_index = len(scene.bone_items) - 1
 
 

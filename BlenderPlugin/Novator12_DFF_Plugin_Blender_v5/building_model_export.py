@@ -549,21 +549,67 @@ def determine_export_order(node_ids, hierarchy):
     return [node_id for node_id in export_order if node_id in ordered_node_ids]
 
 
-def build_default_user_data(node_id, bone_type_data):
-    if bone_type_data is not None:
-        for bone in bone_type_data:
-            if bone["name"] == str(node_id):
-                bone_type = bone["type"]
-                if bone_type == "BUILDING":
-                    return {"3dsmax User Properties": ["Effect=SimpleObjectWithSnow"]}
-                if bone_type == "DECAL":
-                    return {"3dsmax User Properties": ["Effect=BuildingDecalWithSnow", "decal=flat"]}
-        if node_id >= 200:
-            return {"3dsmax User Properties": [f"tag = {node_id}"]}
+def _find_bone_type_entry(node_id, bone_type_data):
+    # Later UI entries override earlier duplicates, matching the user's most
+    # recent explicit configuration.
+    for bone in reversed(bone_type_data or []):
+        if bone.get("name") == str(node_id):
+            return bone
+    return None
 
+
+def _is_managed_effect_property(property_line):
+    normalized = re.sub(r"\s+", "", str(property_line)).lower()
+    return normalized.startswith("effect=") or normalized == "decal=flat"
+
+
+def _has_tag_property(property_lines):
+    return any(
+        re.match(r"^tag\s*=", str(property_line).strip(), flags=re.IGNORECASE)
+        for property_line in property_lines
+    )
+
+
+def resolve_frame_user_data(node_id, user_data, bone_type_data):
+    """Merge Bone Manager effects into imported/custom frame UserData.
+
+    Existing non-effect properties (especially animation tags) are preserved.
+    ``include_tag`` lets newly configured animated frames export both their tag
+    and the selected snow/decal effect.
+    """
+    resolved = deepcopy(user_data) if isinstance(user_data, dict) else OrderedDict()
+    bone_entry = _find_bone_type_entry(node_id, bone_type_data)
+
+    if bone_entry is not None:
+        property_lines = list(resolved.get("3dsmax User Properties", []))
+        property_lines = [
+            property_line
+            for property_line in property_lines
+            if not _is_managed_effect_property(property_line)
+        ]
+
+        if bone_entry.get("include_tag", False) and not _has_tag_property(property_lines):
+            property_lines.insert(0, f"tag = {node_id}")
+
+        bone_type = bone_entry.get("type")
+        if bone_type == "BUILDING":
+            property_lines.append("Effect=SimpleObjectWithSnow")
+        elif bone_type == "DECAL":
+            property_lines.extend(("Effect=BuildingDecalWithSnow", "decal=flat"))
+
+        if property_lines:
+            resolved["3dsmax User Properties"] = property_lines
+        return resolved or None
+
+    if resolved:
+        return resolved
     if node_id >= 200:
         return {"3dsmax User Properties": [f"tag = {node_id}"]}
     return None
+
+
+def build_default_user_data(node_id, bone_type_data):
+    return resolve_frame_user_data(node_id, None, bone_type_data)
 
 
 def _build_building_hanim_hierarchy(node_ids, hierarchy, export_order):
@@ -651,7 +697,7 @@ def _find_building_hanim_root_frame(node_ids, hierarchy, export_order):
 def build_frame_extension(frame_index, node_id, user_data, bone_type_data, hanim_data, root_frame_index, hanim_nodes, hanim_parents):
     extension = OrderedDict()
 
-    resolved_user_data = user_data or build_default_user_data(node_id, bone_type_data)
+    resolved_user_data = resolve_frame_user_data(node_id, user_data, bone_type_data)
     if resolved_user_data is not None:
         extension["userDataPLG"] = resolved_user_data
 
@@ -1008,7 +1054,12 @@ def build_building_export_json(
 
 def collect_building_scene_export_payload(scene):
     bone_type_data = [
-        {"index": bone.bone_index, "name": bone.bone_name, "type": bone.bone_type}
+        {
+            "index": bone.bone_index,
+            "name": bone.bone_name,
+            "type": bone.bone_type,
+            "include_tag": bone.include_tag,
+        }
         for bone in scene.bone_items
     ] or None
 

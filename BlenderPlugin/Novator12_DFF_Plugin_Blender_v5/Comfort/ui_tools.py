@@ -223,6 +223,7 @@ class BoneMappingList(UIList):
             layout.prop(item, "bone_index", text="Idx")
             layout.prop(item, "bone_name", text="Num")
             layout.prop(item, "bone_type", text="Mat")
+            layout.prop(item, "include_tag", text="Tag")
         elif self.layout_type == "GRID":
             layout.alignment = "CENTER"
 
