@@ -25,8 +25,6 @@ Das Add-on verarbeitet RenderWare-Modelle (`.dff`) und Animationen (`.anm`) übe
 - Erzeugung beziehungsweise Validierung der für den Export benötigten indexierten TriStrip-BinMesh-Daten
 - Action-basierter Animationsworkflow mit FPS- und Root-Node-Behandlung
 
-![PB_Factory mit Mesh Validation und Geometry Tools](docs/handbook/images/fig-06-pb-factory-overview.png)
-
 ### Units
 
 - Import von skinned Unit-Modellen als `.dff` oder `.json`
@@ -37,8 +35,6 @@ Das Add-on verarbeitet RenderWare-Modelle (`.dff`) und Animationen (`.anm`) übe
 - Separate Unit-Animation-Befehle für `.anm` und `.json`
 - Export der aktiven Action oder aller Actions einer ausgewählten Armature
 - Unit-DFF-Ausgabe ist in der Oberfläche vorhanden, derzeit aber durch den bestätigten Konverterfehler blockiert
-
-![Importierte Unit mit Armature und Selection Sphere](docs/handbook/images/fig-16-unit-overview.png)
 
 ### Neue Blender-Werkzeuge
 
@@ -92,8 +88,6 @@ Unter **File > Export** stehen die passenden vier Gegenstücke zur Verfügung:
 - `Novator-Export-Buidling-Anm (.anm/.json)`
 - `Novator-Export-Unit (.dff/.json)`
 - `Novator-Export-Unit-Anm (.anm/.json)`
-
-![Novator-Importbefehle in Blender 5.0.1](docs/handbook/images/fig-04-import-menu-detail.png)
 
 ## Schnelleinstieg: Gebäude
 
@@ -158,12 +152,7 @@ Das ist eine Schema-Inkompatibilität zwischen dem erzeugten JSON und der `RpSki
 
 ## Dokumentation
 
-| Dokument | Inhalt |
-|---|---|
-| [Englisches Handbuch (PDF)](docs/handbook/Settlers_5_Blender_Plugin_Handbook_EN.pdf) | Vollständige Einführung, Building- und Unit-Workflows, Abbildungen und Referenz |
-| [Englisches Handbuch (Markdown)](docs/handbook/Settlers_5_Blender_Plugin_Handbook_EN.md) | Durchsuchbare Quellfassung des Handbuchs |
-| [Testbericht](docs/handbook/Settlers_5_Blender_Plugin_Test_Report_EN.md) | Nachvollziehbare PASS-/FAIL-/NOT-TESTED-Ergebnisse |
-| [Coverage-Matrix](docs/handbook/Settlers_5_Blender_Plugin_Coverage_Matrix_EN.md) | Zuordnung von Anforderungen, Kapiteln, Abbildungen und Testbelegen |
+Das veröffentlichte [englische Handbuch als PDF](docs/handbook/Settlers_5_Blender_Plugin_Handbook_EN.pdf) enthält die vollständige Einführung, Building- und Unit-Workflows, Blender-Abbildungen, die Bedienungsreferenz und die verifizierten Testgrenzen. Quelldateien, Rohbilder, Build-Werkzeuge und separate Arbeitsberichte im Ordner `docs` bleiben lokal und werden nicht eingecheckt.
 
 ## Projektstruktur
 

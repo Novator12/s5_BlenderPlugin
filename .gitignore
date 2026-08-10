@@ -4,3 +4,14 @@ BlenderPlugin/.idea/
 emitters/
 models/
 
+# Keep generated handbook sources, captures, tools, and reports local.
+# Only the published PDF and the two reproducible test assets are committed.
+docs/*
+!docs/handbook/
+docs/handbook/*
+!docs/handbook/Settlers_5_Blender_Plugin_Handbook_EN.pdf
+!docs/handbook/_test/
+docs/handbook/_test/*
+!docs/handbook/_test/PB_Factory.blend
+!docs/handbook/_test/pu_leadersword4.dff
+
