@@ -1,4 +1,3 @@
-import json
 import os
 import re
 
@@ -19,6 +18,7 @@ from .Comfort.constants import (
     SPHERE_LINKED_MESH_PROP,
 )
 from .Comfort.io_utils import load_building_model_payload
+from .Comfort.geometry_tool_metadata import write_geometry_tool_metadata
 from .particle_effects_data import PARTICLE_EFFECT_LUT
 from .Comfort.transform_utils import (
     frame_dict_to_matrix,
@@ -318,56 +318,7 @@ def _attach_sphere_proxy(geometry_data, mesh_object, empty_geometry, frame_rest_
 
 
 def _write_geometry_tool_metadata(scene, geometry_data, mesh_object, empty_geometry):
-    geometry_entry = scene.geometry_tool_items.add()
-    geometry_entry.mesh_name = mesh_object.name
-    geometry_entry.mesh_object = mesh_object
-    geometry_entry.linked_to_object = True
-    geometry_entry.materials.clear()
-
-    if empty_geometry:
-        geometry_entry.bin_mesh_data = "Empty-Geometry"
-        material_entry = geometry_entry.materials.add()
-        material_entry.name = "Empty-Geometry"
-        material_entry.ambient = False
-        material_entry.specular = False
-        material_entry.diffuse = False
-        material_entry.uv_trans = False
-        material_entry.dual_tex = False
-        material_entry.snow_texture = "Empty-Geometry"
-        material_entry.texture_alpha = ""
-        return
-
-    extension = geometry_data.get("extension", {})
-    bin_mesh = extension.get("BinMeshPLG")
-    if bin_mesh is None:
-        geometry_entry.bin_mesh_data = "No data"
-    else:
-        geometry_entry.bin_mesh_data = json.dumps({
-            "Flags": bin_mesh.get("Flags", {}),
-            "Meshes": bin_mesh.get("Meshes", []),
-        })
-
-    for material in geometry_data.get("materials", []):
-        material_entry = geometry_entry.materials.add()
-        texture_info = material.get("textures", [{}])[0]
-        material_entry.name = texture_info.get("texture", "Unknown")
-        material_entry.texture_alpha = texture_info.get("textureAlpha", "")
-
-        surface_props = material.get("SurfaceProps", {})
-        material_entry.ambient = bool(surface_props.get("ambient", 1))
-        material_entry.specular = bool(surface_props.get("specular", 0))
-        material_entry.diffuse = bool(surface_props.get("diffuse", 1))
-
-        material_fx = material.get("extension", {}).get("MaterialFXMat", {})
-        fx_type = material_fx.get("Data1", {}).get("Type", "")
-        if fx_type == "DualTexture":
-            material_entry.dual_tex = True
-            material_entry.snow_texture = material_fx.get("Data1", {}).get("Texture1", {}).get("texture", "No data")
-        elif fx_type == "UVTransformMat":
-            material_entry.uv_trans = True
-            material_entry.snow_texture = "UVTransformMat"
-        else:
-            material_entry.snow_texture = "No data"
+    return write_geometry_tool_metadata(scene, geometry_data, mesh_object, empty_geometry)
 
 
 def build_building_geometry(geometry_data, armature_object, frame_rest_matrix, bone_name, mesh_index):

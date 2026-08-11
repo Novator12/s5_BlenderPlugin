@@ -7,7 +7,7 @@ Blender-Add-on zum Importieren, Bearbeiten, Animieren und Exportieren von Gebäu
 Das Add-on verarbeitet RenderWare-Modelle (`.dff`) und Animationen (`.anm`) über ein lesbares JSON-Zwischenformat. Für die Umwandlung zwischen Binärformat und JSON wird die mitgelieferte `S5Converter.exe` aus dem Projekt von [mcb5637](https://github.com/mcb5637/S5Converter) verwendet.
 
 > [!IMPORTANT]
-> Gebäude-Import, -Export und -Animation wurden mit `PB_Factory` erfolgreich als Blender-/Konverter-Roundtrip geprüft. Der Unit-Import und der Unit-JSON-Export funktionieren mit `pu_leadersword4`; der binäre Unit-DFF-Export scheitert derzeit an einer bestätigten Schema-Inkompatibilität des Konverters. Details stehen unter [Bekannte Einschränkungen](#bekannte-einschränkungen).
+> Gebäude-Import, -Export und -Animation wurden mit `PB_Factory` erfolgreich als Blender-/Konverter-Roundtrip geprüft. Unit-Import, Unit-JSON-Export und der binäre Unit-DFF-Roundtrip wurden mit `pu_leadersword4` und `pu_leadercavalry4` erfolgreich geprüft. Eine Ingame-Prüfung steht weiterhin aus.
 
 ## Funktionsumfang
 
@@ -27,14 +27,15 @@ Das Add-on verarbeitet RenderWare-Modelle (`.dff`) und Animationen (`.anm`) übe
 
 ### Units
 
-- Import von skinned Unit-Modellen als `.dff` oder `.json`
-- Export des bearbeiteten Unit-Modells als diagnostisches `.json`
+- Import und Export von skinned Unit-Modellen als `.dff` oder `.json`
 - Aufbau der Unit-Armature und Bone-Hierarchie
 - Skinning über Vertex Groups, normalisierte Gewichte und Armature Modifier
 - Import und Erhalt der Unit-Selection-Sphere
+- Automatische, mit dem Unit-Mesh verknüpfte Geometry-Tool-Einträge aus den importierten Material- und BinMesh-Daten
+- Kantige Blender-Darstellung bei separatem Erhalt der ursprünglichen DFF-Normalen für den Export
 - Separate Unit-Animation-Befehle für `.anm` und `.json`
 - Export der aktiven Action oder aller Actions einer ausgewählten Armature
-- Unit-DFF-Ausgabe ist in der Oberfläche vorhanden, derzeit aber durch den bestätigten Konverterfehler blockiert
+- Binärer Unit-DFF-Export über den mitgelieferten S5Converter
 
 ### Neue Blender-Werkzeuge
 
@@ -105,9 +106,11 @@ Unter **File > Export** stehen die passenden vier Gegenstücke zur Verfügung:
 1. Arbeite in einer neuen, gespeicherten Blender-Datei.
 2. Wähle **File > Import > Novator-Import-Unit** und öffne die Unit-DFF oder das passende JSON.
 3. Prüfe Body-Mesh, `Armature_UnitSkin`, Armature Modifier, Vertex Groups, Gewichte und die markierte Selection Sphere.
+   Für jedes importierte Unit-Mesh wird automatisch ein verknüpfter Eintrag im **Geometry Tool** angelegt. Unit-Meshes werden in Blender kantig dargestellt; ihre DFF-Normalen bleiben separat für den Export erhalten.
 4. Verändere die Rest-Hierarchie, Bone-Namen und Skin-Gruppen nur, wenn die Exportauswirkungen bekannt sind. Pro Vertex dürfen höchstens vier gültige Bone-Einflüsse exportiert werden.
 5. Verwende zunächst **Novator-Export-Unit** mit dem Format **JSON** und kontrolliere das Ergebnis.
-6. Verlasse dich mit Version 3.2.1 noch nicht auf den Unit-DFF-Export; der aktuelle Fehler ist unten dokumentiert.
+6. Exportiere danach mit **Novator-Export-Unit** im Format **DFF** in eine neue Datei.
+7. Importiere die erzeugte Unit-DFF zur Kontrolle erneut in eine saubere Blender-Datei, bevor du sie im Spiel verwendest.
 
 Eine Unit-Animation benötigt eine passende Unit-Armature und Action. Die Menübefehle sind implementiert, wurden im aktuellen Audit wegen eines fehlenden passenden Unit-ANM-Beispiels jedoch nicht als Roundtrip bestätigt.
 
@@ -122,8 +125,9 @@ Eine Unit-Animation benötigt eine passende Unit-Armature und Action. Die Menüb
 | Building-ANM-Re-Import | **PASS** |
 | `pu_leadersword4.dff` als Unit importieren | **PASS** |
 | Unit-JSON-Export | **PASS** |
-| Unit-DFF-Export | **FAIL** – Konverter-Schemafehler bei `RpSkin.NumBones` |
-| Unit-DFF-Re-Import | **NICHT AUSGEFÜHRT** – keine DFF erzeugt |
+| Unit-DFF-Export | **PASS** |
+| Unit-DFF-Re-Import | **PASS** |
+| `pu_leadercavalry4.dff`: Unit-Import, Geometry Tool und DFF-Roundtrip | **PASS** |
 | Unit-ANM-Import/-Export/-Re-Import | **NICHT GETESTET** – kein passendes Sample vorhanden |
 | Ingame-Prüfung | **NICHT GETESTET** |
 
@@ -131,15 +135,9 @@ Die PASS-Ergebnisse belegen den genannten Blender-/Add-on-/Konverterablauf mit d
 
 ## Bekannte Einschränkungen
 
-### Unit-DFF-Export
+### Unit-DFF-Testumfang
 
-Der aktuelle Unit-JSON-Export funktioniert, aber der mitgelieferte Konverter lehnt die erzeugte Unit-Struktur beim binären DFF-Export ab:
-
-```text
-System.Text.Json.JsonException: The JSON property 'NumBones' could not be mapped to any .NET member contained in type 'S5Converter.Geometry.RpSkin'.
-```
-
-Das ist eine Schema-Inkompatibilität zwischen dem erzeugten JSON und der `RpSkin`-Abbildung des Konverters. Es handelt sich nicht um den Nachweis eines maximalen Bone-Limits. Bis zur Korrektur darf ein erfolgreicher Unit-DFF-Roundtrip nicht angenommen werden.
+Der Unit-DFF-Roundtrip wurde mit `pu_leadersword4` und `pu_leadercavalry4` unter Blender 5.0.1 und dem mitgelieferten S5Converter bestätigt. Dabei wurden das `RwMatrixRaw`-Schema, direkte HAnim-Bone-Indizes, `MaxWeight`, Frame-Matrixflags, SplitData, Geometry-Tool-Metadaten und die getrennte Speicherung der DFF-Normalen geprüft. Dieser technische Roundtrip ersetzt keine Ingame-Prüfung und garantiert noch nicht die Kompatibilität beliebiger Unit-Assets.
 
 ### Weitere Grenzen und Sicherheit
 

@@ -12,6 +12,7 @@ from .Comfort.constants import (
     ATOMIC_EXTENSION_PROP,
     ATOMIC_FRAME_INDEX_PROP,
     BONE_NAME_PADDING,
+    FRAME_UNKNOWN_INT_PROP,
     GEOMETRY_USER_DATA_PROP,
     MATERIAL_AMBIENT_PROP,
     MATERIAL_DIFFUSE_PROP,
@@ -25,8 +26,11 @@ from .Comfort.constants import (
     SPHERE_LINKED_MESH_PROP,
     TEXTURE_ALPHA_PROP,
     TEXTURE_NAME_PROP,
+    UNIT_ATOMIC_ORDER_PROP,
     UNIT_BONE_DISPLAY_LENGTH,
+    UNIT_NORMAL_ATTRIBUTE,
 )
+from .Comfort.geometry_tool_metadata import write_geometry_tool_metadata
 from .Comfort.io_utils import load_building_model_payload
 from .Comfort.transform_utils import (
     frame_dict_to_matrix,
@@ -47,6 +51,7 @@ def _extract_frame_metadata(frame_container):
     return {
         "parent_index": frame_data["parentFrameIndex"],
         "matrix": frame_dict_to_matrix(frame_data).transposed(),
+        "unknown_int": int(frame_data.get("UnknownIntProbablyUnused", 0)),
         "node_id": None if hanim_data is None else hanim_data.get("nodeID"),
         "user_data": extension.get("userDataPLG"),
         "hanim_data": hanim_data,
@@ -142,6 +147,7 @@ def build_unit_armature_from_frames(frame_containers, use_connect):
         edit_bone.head = world_matrix.to_translation()
         edit_bone.tail = edit_bone.head + bone_axis * UNIT_BONE_DISPLAY_LENGTH
         edit_bone.roll = bone_roll
+        edit_bone[FRAME_UNKNOWN_INT_PROP] = entry["unknown_int"]
 
         parent_index = hierarchy[frame_index]
         if parent_index != -1:
@@ -197,6 +203,38 @@ def _populate_vertices(bm, geometry_data):
 
     bm.verts.index_update()
     bm.verts.ensure_lookup_table()
+
+
+def _store_unit_source_normals(mesh, geometry_data):
+    normals = geometry_data.get("morphTargets", [{}])[0].get("normals", [])
+    if len(normals) != len(mesh.vertices):
+        return
+
+    try:
+        existing_attribute = mesh.attributes.get(UNIT_NORMAL_ATTRIBUTE)
+        if existing_attribute is not None:
+            mesh.attributes.remove(existing_attribute)
+        normal_attribute = mesh.attributes.new(
+            name=UNIT_NORMAL_ATTRIBUTE,
+            type="FLOAT_VECTOR",
+            domain="POINT",
+        )
+        for attribute_value, normal in zip(normal_attribute.data, normals):
+            attribute_value.vector = (
+                float(normal["x"]),
+                float(normal["y"]),
+                float(normal["z"]),
+            )
+    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+        return
+
+
+def _set_unit_flat_shading(mesh):
+    custom_normal_attribute = mesh.attributes.get("custom_normal")
+    if custom_normal_attribute is not None:
+        mesh.attributes.remove(custom_normal_attribute)
+    for polygon in mesh.polygons:
+        polygon.use_smooth = False
 
 
 def _populate_faces(bm, uv_layer, snow_uv_layer, geometry_data, primary_uvs, secondary_uvs):
@@ -276,6 +314,9 @@ def _build_unit_mesh_object(geometry_data, armature_object, mesh_name, mesh_inde
     mesh = bpy.data.meshes.new(mesh_name)
     bm.to_mesh(mesh)
     bm.free()
+    mesh.update()
+    _store_unit_source_normals(mesh, geometry_data)
+    _set_unit_flat_shading(mesh)
     mesh.update()
 
     mesh_object = bpy.data.objects.new(mesh_name, mesh)
@@ -407,12 +448,19 @@ def import_unit_clump(js, unit_name, use_connect=False):
             mesh_index,
         )
         mesh_object[ATOMIC_FRAME_INDEX_PROP] = int(atomic_entry.get("frameIndex", 0))
+        mesh_object[UNIT_ATOMIC_ORDER_PROP] = mesh_index - 1
         mesh_object[ATOMIC_EXTENSION_PROP] = json.dumps(atomic_entry.get("extension", {}))
         mesh_object["s5_bin_mesh_plg"] = json.dumps(geometry_data.get("extension", {}).get("BinMeshPLG", {}))
         mesh_object["s5_triangles"] = json.dumps(geometry_data.get("triangles", []))
         mesh_object["s5_skin_plg"] = json.dumps(geometry_data.get("extension", {}).get("SkinPLG", {}))
         if "userDataPLG" in geometry_data.get("extension", {}):
             mesh_object[GEOMETRY_USER_DATA_PROP] = json.dumps(geometry_data["extension"].get("userDataPLG"))
+        write_geometry_tool_metadata(
+            bpy.context.scene,
+            geometry_data,
+            mesh_object,
+            bone_index=atomic_entry.get("frameIndex"),
+        )
 
     return armature_object
 

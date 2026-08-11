@@ -12,6 +12,7 @@ from bpy_extras.io_utils import ExportHelper
 from .Comfort.constants import (
     ATOMIC_EXTENSION_PROP,
     ATOMIC_FRAME_INDEX_PROP,
+    FRAME_UNKNOWN_INT_PROP,
     GEOMETRY_USER_DATA_PROP,
     MATERIAL_AMBIENT_PROP,
     MATERIAL_DIFFUSE_PROP,
@@ -23,6 +24,8 @@ from .Comfort.constants import (
     ROOT_HANIM_PARENTS_PROP,
     TEXTURE_ALPHA_PROP,
     TEXTURE_NAME_PROP,
+    UNIT_ATOMIC_ORDER_PROP,
+    UNIT_NORMAL_ATTRIBUTE,
 )
 from .Comfort.io_utils import save_building_model_payload
 from .Comfort.json_utils import json_loads_or_default
@@ -68,6 +71,7 @@ def collect_unit_armature_export_state(armature_object):
         hierarchy = []
         rest_matrices = []
         hanim_data_entries = []
+        frame_unknown_ints = []
         node_ids = []
 
         for bone_name in bone_names_sorted:
@@ -88,6 +92,7 @@ def collect_unit_armature_export_state(armature_object):
 
             hanim_data = bone.get("hanimData")
             hanim_data_entries.append(hanim_data.to_dict() if hanim_data is not None else None)
+            frame_unknown_ints.append(int(bone.get(FRAME_UNKNOWN_INT_PROP, 0)))
             node_ids.append(bone_name_to_node_id(bone_name))
 
         return {
@@ -95,6 +100,7 @@ def collect_unit_armature_export_state(armature_object):
             "hierarchy": hierarchy,
             "rest_matrices": rest_matrices,
             "hanim_data_entries": hanim_data_entries,
+            "frame_unknown_ints": frame_unknown_ints,
             "node_ids": node_ids,
             "root_hanim_nodes": json_loads_or_default(armature_object.get(ROOT_HANIM_NODES_PROP, "null"), None),
             "root_hanim_parents": json_loads_or_default(armature_object.get(ROOT_HANIM_PARENTS_PROP, "null"), None),
@@ -171,7 +177,15 @@ def _build_unit_hanim_nodes(node_ids, hierarchy, root_hanim_nodes=None, root_han
     return formatted_nodes, parents, frame_index_to_node_index
 
 
-def build_unit_frame_entries(hierarchy, rest_matrices, hanim_data_entries, node_ids, root_hanim_nodes=None, root_hanim_parents=None):
+def build_unit_frame_entries(
+    hierarchy,
+    rest_matrices,
+    hanim_data_entries,
+    node_ids,
+    root_hanim_nodes=None,
+    root_hanim_parents=None,
+    frame_unknown_ints=None,
+):
     hanim_nodes, hanim_parents, frame_index_to_node_index = _build_unit_hanim_nodes(
         node_ids,
         hierarchy,
@@ -203,6 +217,11 @@ def build_unit_frame_entries(hierarchy, rest_matrices, hanim_data_entries, node_
             {"x": rotation[1][0], "y": rotation[1][1], "z": rotation[1][2]},
             {"x": rotation[2][0], "y": rotation[2][1], "z": rotation[2][2]},
         ]
+        frame_entry["frame"]["UnknownIntProbablyUnused"] = (
+            int(frame_unknown_ints[frame_index])
+            if frame_unknown_ints is not None and frame_index < len(frame_unknown_ints)
+            else 0
+        )
 
         extension = OrderedDict()
         if frame_index != 0:
@@ -243,23 +262,31 @@ def collect_unit_meshes_for_armature(armature_object):
         if obj.type == "MESH" and any(mod.type == "ARMATURE" and mod.object == armature_object for mod in obj.modifiers)
     ]
 
-    if not meshes:
-        return []
-
-    name_to_mesh = {mesh.name: mesh for mesh in meshes}
-    root_name = min(name_to_mesh)
-    root_mesh = name_to_mesh[root_name]
-
-    ordered = [root_mesh]
-    children = sorted(
-        (mesh for mesh in meshes if mesh != root_mesh),
-        key=lambda mesh: mesh.name,
+    return sorted(
+        meshes,
+        key=lambda mesh: (
+            int(mesh.get(UNIT_ATOMIC_ORDER_PROP, 10 ** 9)),
+            mesh.name,
+        ),
     )
-    ordered.extend(children)
-    return ordered
 
 
 def _collect_unit_normals(mesh_object):
+    normal_attribute = mesh_object.data.attributes.get(UNIT_NORMAL_ATTRIBUTE)
+    if (
+        normal_attribute is not None
+        and normal_attribute.domain == "POINT"
+        and normal_attribute.data_type == "FLOAT_VECTOR"
+        and len(normal_attribute.data) == len(mesh_object.data.vertices)
+    ):
+        normals = []
+        for vertex, attribute_value in zip(mesh_object.data.vertices, normal_attribute.data):
+            normal = attribute_value.vector
+            if normal.length_squared <= 1.0e-12:
+                normal = vertex.normal
+            normals.append(OrderedDict((("x", normal.x), ("y", normal.y), ("z", normal.z))))
+        return normals
+
     return [
         OrderedDict((("x", vertex.normal.x), ("y", vertex.normal.y), ("z", vertex.normal.z)))
         for vertex in mesh_object.data.vertices
@@ -397,12 +424,34 @@ def _build_unit_material_payloads(mesh_object):
     return materials
 
 
-def _matrix_to_skin_matrix(matrix):
-    values = []
-    for row in matrix:
-        for cell in row:
-            values.append(float(cell))
-    return values
+def _matrix_column_to_vector(matrix, column_index):
+    return {
+        "x": float(matrix[0][column_index]),
+        "y": float(matrix[1][column_index]),
+        "z": float(matrix[2][column_index]),
+    }
+
+
+def _matrix_to_skin_matrix(matrix, template=None):
+    template = template if isinstance(template, dict) else {}
+    template_flags = template.get("Flags")
+    if not isinstance(template_flags, dict):
+        template_flags = {}
+
+    return {
+        "Pad1": int(template.get("Pad1", 0)),
+        "Pad2": int(template.get("Pad2", 0)),
+        "Pad3": int(template.get("Pad3", 0)),
+        "Right": _matrix_column_to_vector(matrix, 0),
+        "Up": _matrix_column_to_vector(matrix, 1),
+        "At": _matrix_column_to_vector(matrix, 2),
+        "Pos": _matrix_column_to_vector(matrix, 3),
+        "Flags": {
+            "Normal": bool(template_flags.get("Normal", True)),
+            "Orthogonal": bool(template_flags.get("Orthogonal", True)),
+            "Identity": bool(template_flags.get("Identity", False)),
+        },
+    }
 
 
 def _pack_unit_bone_indices(node_indices):
@@ -418,10 +467,15 @@ def _pack_unit_bone_indices(node_indices):
 
 
 def _collect_unit_skin_payload(mesh_object, bone_names_sorted, frame_index_to_node_index, rest_matrices, hierarchy):
+    stored_skin_payload = json_loads_or_default(mesh_object.get("s5_skin_plg", "null"), {})
+    if not isinstance(stored_skin_payload, dict):
+        stored_skin_payload = {}
+
     vertex_bone_indices = []
     vertex_bone_weights = []
     used_node_indices = []
-    used_node_index_lookup = {}
+    used_node_index_set = set()
+    max_weight = 0
 
     for vertex in mesh_object.data.vertices:
         assignments = []
@@ -446,30 +500,43 @@ def _collect_unit_skin_payload(mesh_object, bone_names_sorted, frame_index_to_no
         weight_sum = sum(weight for _node_index, weight in assignments)
         if weight_sum > 0.0:
             assignments = [(node_index, weight / weight_sum) for node_index, weight in assignments]
+        max_weight = max(max_weight, len(assignments))
 
         packed_indices = []
         packed_weights = {"w0": 0.0, "w1": 0.0, "w2": 0.0, "w3": 0.0}
         for slot_index, (node_index, weight) in enumerate(assignments):
-            if node_index not in used_node_index_lookup:
-                used_node_index_lookup[node_index] = len(used_node_indices)
+            if node_index not in used_node_index_set:
+                used_node_index_set.add(node_index)
                 used_node_indices.append(node_index)
-            packed_indices.append(used_node_index_lookup[node_index])
+            packed_indices.append(node_index)
             packed_weights[f"w{slot_index}"] = float(weight)
 
         vertex_bone_indices.append(_pack_unit_bone_indices(packed_indices))
         vertex_bone_weights.append(packed_weights)
 
+    stored_skin_matrices = stored_skin_payload.get("SkinToBoneMatrices", [])
+    if not isinstance(stored_skin_matrices, list):
+        stored_skin_matrices = []
+
     skin_to_bone_matrices = []
     for frame_index, node_index in sorted(frame_index_to_node_index.items(), key=lambda item: item[1]):
         world_matrix = accumulate_rest_matrix(rest_matrices, hierarchy, frame_index)
-        skin_to_bone_matrices.append(_matrix_to_skin_matrix(world_matrix.inverted()))
+        matrix_template = stored_skin_matrices[node_index] if 0 <= node_index < len(stored_skin_matrices) else None
+        skin_to_bone_matrices.append(_matrix_to_skin_matrix(world_matrix.inverted(), matrix_template))
 
-    return {
+    skin_payload = {
+        "MaxWeight": max_weight,
         "UsedBones": used_node_indices,
         "VertexBoneIndices": vertex_bone_indices,
         "VertexBoneWeights": vertex_bone_weights,
         "SkinToBoneMatrices": skin_to_bone_matrices,
     }
+
+    stored_split_data = stored_skin_payload.get("SplitData")
+    if isinstance(stored_split_data, dict):
+        skin_payload["SplitData"] = stored_split_data
+
+    return skin_payload
 
 
 def build_unit_geometry_payload(mesh_object, bone_names_sorted, frame_index_to_node_index, rest_matrices, hierarchy):
@@ -553,6 +620,7 @@ def build_unit_export_json(context):
         node_ids,
         armature_state["root_hanim_nodes"],
         armature_state["root_hanim_parents"],
+        frame_unknown_ints=armature_state["frame_unknown_ints"],
     )
 
     meshes = collect_unit_meshes_for_armature(armature_object)
