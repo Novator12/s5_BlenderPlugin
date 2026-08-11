@@ -465,7 +465,6 @@ def _collect_unit_skin_payload(mesh_object, bone_names_sorted, frame_index_to_no
         skin_to_bone_matrices.append(_matrix_to_skin_matrix(world_matrix.inverted()))
 
     return {
-        "NumBones": len(frame_index_to_node_index),
         "UsedBones": used_node_indices,
         "VertexBoneIndices": vertex_bone_indices,
         "VertexBoneWeights": vertex_bone_weights,
